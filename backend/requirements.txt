@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+supabase
+PyGithub
+google-generativeai
+firebase-admin
+pydantic
+pydantic-settings
+python-dotenv
+httpx
+python-multipart
+websockets
+aiofiles
