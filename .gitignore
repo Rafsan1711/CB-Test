@@ -1,8 +1,27 @@
-node_modules/
-build/
-dist/
-coverage/
+# Python
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+backend/venv/
+backend/.venv/
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
 .DS_Store
-*.log
-.env*
-!.env.example
+Thumbs.db
+
+# Secrets
+*.pem
+*.key
+firebase-service-account.json
