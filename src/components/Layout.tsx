@@ -1,7 +1,7 @@
 import React from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth-context';
-import { LayoutDashboard, FolderGit2, ListTodo, Tag, Settings, LogOut, Bell } from 'lucide-react';
+import { LayoutDashboard, FolderGit2, ListTodo, Tag, Settings, LogOut, Bell, BookOpen } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export const Layout: React.FC = () => {
@@ -12,6 +12,7 @@ export const Layout: React.FC = () => {
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/repos', label: 'Repositories', icon: FolderGit2 },
     { path: '/tasks', label: 'Tasks', icon: ListTodo },
+    { path: '/docs', label: 'Documentation', icon: BookOpen },
     { path: '/releases', label: 'Releases', icon: Tag },
     { path: '/settings', label: 'Settings', icon: Settings },
   ];
@@ -26,8 +27,8 @@ export const Layout: React.FC = () => {
       {/* Sidebar */}
       <aside className="w-64 bg-gray-900 border-r border-gray-800 flex flex-col">
         <div className="p-6 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-400 to-blue-500 flex items-center justify-center text-xl shadow-lg shadow-green-500/20">
-            🤖
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-400 to-blue-500 flex items-center justify-center shadow-lg shadow-green-500/20 overflow-hidden">
+            <img src="/contribot-logo.png" alt="ContriBot Logo" className="w-full h-full object-cover" />
           </div>
           <span className="text-xl font-bold tracking-tight">ContriBot</span>
         </div>

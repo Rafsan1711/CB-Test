@@ -189,6 +189,10 @@ export const apiService = {
     getLatestRelease: async (repoId: string) => {
       const res = await api.get<Release>(`/releases/${repoId}/releases/latest`);
       return res.data;
+    },
+    triggerRelease: async (repoId: string) => {
+      const res = await api.post<Release>(`/releases/${repoId}/releases/trigger`);
+      return res.data;
     }
   },
   tasks: {

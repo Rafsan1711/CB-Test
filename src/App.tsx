@@ -7,6 +7,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { RepositoriesPage } from './pages/RepositoriesPage';
 import { RepoDetailPage } from './pages/RepoDetailPage';
 import { TasksPage } from './pages/TasksPage';
+import { DocsPage } from './pages/DocsPage';
 import { Toaster } from 'react-hot-toast';
 
 // Placeholder components for other routes
@@ -44,6 +45,7 @@ const AppRoutes = () => {
         <Route path="/repos" element={<RepositoriesPage />} />
         <Route path="/repos/:id/*" element={<RepoDetailPage />} />
         <Route path="/tasks" element={<TasksPage />} />
+        <Route path="/docs" element={<DocsPage />} />
         <Route path="/releases" element={<ReleasesPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>

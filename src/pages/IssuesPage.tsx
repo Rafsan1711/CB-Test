@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiService, Issue } from '../lib/api';
 import { IssueApprovalCard } from '../components/IssueApprovalCard';
-import { AlertCircle, CheckCircle2, Clock, PlayCircle, XCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock, PlayCircle, XCircle, Tag } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 
