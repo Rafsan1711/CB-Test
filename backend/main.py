@@ -26,6 +26,10 @@ app.include_router(releases.router, prefix="/api/v1/releases", tags=["Releases"]
 app.include_router(webhook.router, prefix="/api/v1/webhook", tags=["Webhook"])
 app.include_router(agent.router, prefix="/api/v1/agent", tags=["Agent"])
 
+@app.get("/")
+async def root():
+    return {"message": "Welcome to ContriBot API", "status": "running"}
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "version": "1.0.0"}

@@ -2,7 +2,7 @@ fastapi
 uvicorn[standard]
 supabase
 PyGithub
-google-generativeai
+google-genai
 firebase-admin
 pydantic
 pydantic-settings

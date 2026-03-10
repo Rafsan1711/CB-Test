@@ -1,7 +1,8 @@
 import asyncio
 import json
 import logging
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from config import settings
 from models.schemas import ConsensusSummary, VerificationResult
 
@@ -16,7 +17,7 @@ class GeminiService:
     MODEL_STABLE_FLASH = "gemini-2.5-flash"
 
     def __init__(self):
-        genai.configure(api_key=settings.GEMINI_API_KEY)
+        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
     def _clean_json_response(self, text: str) -> str:
         """Removes markdown code blocks if the model returns them despite instructions."""
@@ -30,26 +31,31 @@ class GeminiService:
         return text.strip()
 
     async def generate(self, prompt: str, model: str, system_prompt: str = None, json_mode: bool = False, temperature: float = 0.3) -> str:
-        generation_config = genai.types.GenerationConfig(
-            temperature=temperature,
-            response_mime_type="application/json" if json_mode else "text/plain"
-        )
+        config_args = {
+            "temperature": temperature,
+        }
+        if json_mode:
+            config_args["response_mime_type"] = "application/json"
+        if system_prompt:
+            config_args["system_instruction"] = system_prompt
+            
+        config = types.GenerateContentConfig(**config_args)
 
         if json_mode:
             prompt += "\n\nIMPORTANT: Return ONLY valid JSON. Do not include markdown formatting like ```json."
 
-        m = genai.GenerativeModel(model_name=model, system_instruction=system_prompt)
-
         for attempt in range(3):
             try:
-                response = await m.generate_content_async(
-                    prompt,
-                    generation_config=generation_config
+                response = await self.client.aio.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=config
                 )
                 
                 # Log token usage
                 usage = response.usage_metadata
-                logger.info(f"Token usage for {model}: prompt={usage.prompt_token_count}, candidates={usage.candidates_token_count}, total={usage.total_token_count}")
+                if usage:
+                    logger.info(f"Token usage for {model}: prompt={usage.prompt_token_count}, candidates={usage.candidates_token_count}, total={usage.total_token_count}")
                 
                 text = response.text
                 if json_mode:
