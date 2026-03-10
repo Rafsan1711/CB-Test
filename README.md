@@ -1,6 +1,7 @@
 <!-- banner -->
 <div align="center">
-  <h1>🤖 ContriBot</h1>
+  <img src="public/contribot-logo.png" alt="ContriBot Logo" width="150" />
+  <h1>ContriBot</h1>
   <p><strong>A Gemini-powered autonomous GitHub repository manager.</strong></p>
 
   [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
