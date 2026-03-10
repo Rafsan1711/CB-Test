@@ -1,0 +1,204 @@
+import axios from 'axios';
+import { auth } from './firebase';
+import toast from 'react-hot-toast';
+
+const api = axios.create({
+  baseURL: import.meta.env.VITE_BACKEND_URL + '/api/v1',
+});
+
+api.interceptors.request.use(async (config) => {
+  if (auth.currentUser) {
+    const token = await auth.currentUser.getIdToken();
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      window.location.href = '/login';
+    } else {
+      toast.error(error.response?.data?.detail || error.message || 'An error occurred');
+    }
+    return Promise.reject(error);
+  }
+);
+
+export interface User {
+  id: string;
+  firebase_uid: string;
+  email: string;
+  github_username?: string;
+  avatar_url?: string;
+  created_at: string;
+}
+
+export interface Repo {
+  id: string;
+  user_id: string;
+  github_full_name: string;
+  github_repo_url?: string;
+  contribot_active: boolean;
+  current_version: string;
+  webhook_secret?: string;
+  settings: any;
+  created_at: string;
+}
+
+export interface Issue {
+  id: string;
+  repo_id: string;
+  github_issue_number?: number;
+  issue_type?: string;
+  title: string;
+  body?: string;
+  status: string;
+  user_response?: string;
+  ai_analysis?: any;
+  labels: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PR {
+  id: string;
+  repo_id: string;
+  issue_id?: string;
+  github_pr_number?: number;
+  title: string;
+  branch_name?: string;
+  status: string;
+  verification_status: string;
+  verification_results: any;
+  consensus_score: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Release {
+  id: string;
+  repo_id: string;
+  version: string;
+  bump_type?: string;
+  release_notes?: string;
+  github_release_url?: string;
+  tag_name?: string;
+  created_at: string;
+}
+
+export interface Task {
+  id: string;
+  repo_id: string;
+  task_type: string;
+  status: string;
+  input_data: any;
+  output_data: any;
+  model_used?: string;
+  error_message?: string;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+}
+
+export interface ActivityLog {
+  id: string;
+  repo_id: string;
+  event_type: string;
+  message: string;
+  metadata: any;
+  severity: string;
+  created_at: string;
+}
+
+export const apiService = {
+  auth: {
+    login: async (firebaseToken: string, githubToken?: string) => {
+      const res = await api.post<User>('/auth/login', { firebase_token: firebaseToken, github_access_token: githubToken || null });
+      return res.data;
+    },
+    getMe: async () => {
+      const res = await api.get<User>('/auth/me');
+      return res.data;
+    },
+    logout: async () => {
+      const res = await api.post('/auth/logout');
+      return res.data;
+    }
+  },
+  repos: {
+    listRepos: async () => {
+      const res = await api.get<Repo[]>('/repos/');
+      return res.data;
+    },
+    addRepo: async (data: { github_full_name: string; github_repo_url?: string }) => {
+      const res = await api.post<Repo>('/repos/', data);
+      return res.data;
+    },
+    getRepo: async (id: string) => {
+      const res = await api.get<Repo>(`/repos/${id}`);
+      return res.data;
+    },
+    updateRepo: async (id: string, data: any) => {
+      const res = await api.put<Repo>(`/repos/${id}`, data);
+      return res.data;
+    },
+    activateRepo: async (id: string) => {
+      const res = await api.post<Repo>(`/repos/${id}/activate`);
+      return res.data;
+    },
+    deactivateRepo: async (id: string) => {
+      const res = await api.post<Repo>(`/repos/${id}/deactivate`);
+      return res.data;
+    },
+    getActivity: async (id: string) => {
+      const res = await api.get<ActivityLog[]>(`/repos/${id}/activity`);
+      return res.data;
+    }
+  },
+  issues: {
+    listIssues: async (repoId: string, status?: string) => {
+      const res = await api.get<Issue[]>(`/issues/${repoId}/issues`, { params: { status } });
+      return res.data;
+    },
+    respondToIssue: async (repoId: string, issueId: string, response: 'yes' | 'no') => {
+      const res = await api.put(`/issues/${repoId}/issues/${issueId}/respond`, { response });
+      return res.data;
+    }
+  },
+  prs: {
+    listPRs: async (repoId: string) => {
+      const res = await api.get<PR[]>(`/prs/${repoId}/prs`);
+      return res.data;
+    },
+    getPR: async (repoId: string, prId: string) => {
+      const res = await api.get<PR>(`/prs/${repoId}/prs/${prId}`);
+      return res.data;
+    },
+    verifyPR: async (repoId: string, prId: string) => {
+      const res = await api.post(`/prs/${repoId}/prs/${prId}/verify`);
+      return res.data;
+    }
+  },
+  releases: {
+    listReleases: async (repoId: string) => {
+      const res = await api.get<Release[]>(`/releases/${repoId}/releases`);
+      return res.data;
+    },
+    getLatestRelease: async (repoId: string) => {
+      const res = await api.get<Release>(`/releases/${repoId}/releases/latest`);
+      return res.data;
+    }
+  },
+  tasks: {
+    listTasks: async (repoId?: string) => {
+      const res = await api.get<Task[]>('/agent/tasks', { params: { repo_id: repoId } });
+      return res.data;
+    },
+    retryTask: async (taskId: string) => {
+      const res = await api.post(`/agent/tasks/${taskId}/retry`);
+      return res.data;
+    }
+  }
+};
