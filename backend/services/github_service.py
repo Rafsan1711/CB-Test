@@ -9,7 +9,7 @@ from config import settings
 class GitHubService:
     def __init__(self):
         # Initialize PyGithub with the ContriBot token
-        self.client = Github(settings.CONTRIBOT_GITHUB_TOKEN)
+        self.client = Github(settings.GITHUB_TOKEN)
 
     async def _run_async(self, func, *args, **kwargs):
         """Helper to run blocking PyGithub calls in a thread pool."""
@@ -157,7 +157,7 @@ class GitHubService:
         # Using httpx to get the raw diff string directly from GitHub API
         url = f"https://api.github.com/repos/{full_name}/pulls/{pr_number}"
         headers = {
-            "Authorization": f"Bearer {settings.CONTRIBOT_GITHUB_TOKEN}",
+            "Authorization": f"Bearer {settings.GITHUB_TOKEN}",
             "Accept": "application/vnd.github.v3.diff"
         }
         async with httpx.AsyncClient() as client:

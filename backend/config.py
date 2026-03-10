@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     SUPABASE_URL: str = ""
     SUPABASE_SERVICE_KEY: str = ""
-    CONTRIBOT_GITHUB_TOKEN: str = ""
+    GITHUB_TOKEN: str = ""
     FIREBASE_SERVICE_ACCOUNT: str = "{}"
     ENVIRONMENT: str = "development"
     CORS_ORIGINS: str = "http://localhost:5173,https://contribot.vercel.app"

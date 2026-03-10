@@ -39,7 +39,7 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to connect to Supabase: {e}")
 
-    if settings.CONTRIBOT_GITHUB_TOKEN:
+    if settings.GITHUB_TOKEN:
         logger.info("GitHub token found.")
     else:
         logger.warning("GitHub token not configured.")
