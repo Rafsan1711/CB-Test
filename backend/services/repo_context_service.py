@@ -18,7 +18,9 @@ class RepoContextService:
     async def get_context(self, repo_id: str, full_name: str, force_rebuild: bool = False) -> Dict[str, Any]:
         """Gets context, rebuilding if stale or forced."""
         repo = await db.get_repo_by_id(repo_id)
-        last_built = repo.get("last_context_built_at")
+        # Use settings as fallback if specific columns are missing
+        settings = repo.get("settings") or {}
+        last_built = repo.get("last_context_built_at") or settings.get("last_context_built_at")
         
         needs_rebuild = force_rebuild
         if not needs_rebuild and last_built:
@@ -39,10 +41,37 @@ class RepoContextService:
                 "tech_stack": list(context.get("tech_stack", {}).values()),
                 "summary": context.get("context_summary", "")
             }
-            await db.client.table("repos").update({
-                "last_context_built_at": datetime.datetime.now(timezone.utc).isoformat(),
+            
+            now_iso = datetime.datetime.now(timezone.utc).isoformat()
+            
+            # Update settings as well to be safe
+            new_settings = {
+                **repo.get("settings", {}),
+                "last_context_built_at": now_iso,
                 "context_summary": summary
-            }).eq("id", repo_id).execute()
+            }
+            
+            # Try to update specific columns, fall back to settings if they don't exist
+            update_payload = {"settings": new_settings}
+            
+            # Check if we can update specific columns by trying a small update first or just catch the error
+            try:
+                # Attempt to update all columns
+                await db.client.table("repos").update({
+                    "last_context_built_at": now_iso,
+                    "context_summary": summary,
+                    "settings": new_settings
+                }).eq("id", repo_id).execute()
+            except Exception as e:
+                error_msg = str(e)
+                if "column" in error_msg and ("context_summary" in error_msg or "last_context_built_at" in error_msg):
+                    logger.warning(f"Database schema mismatch: {error_msg}. Using settings fallback.")
+                    await db.client.table("repos").update({
+                        "settings": new_settings
+                    }).eq("id", repo_id).execute()
+                else:
+                    # Some other error, re-raise
+                    raise e
             
             return context
         else:
