@@ -29,5 +29,5 @@ async def retry_task(task_id: str, current_user: dict = Depends(get_current_user
 
 @router.delete("/tasks/{task_id}")
 async def cancel_task(task_id: str, current_user: dict = Depends(get_current_user)):
-    await db.update_agent_task(task_id, {"status": "cancelled"})
+    await db.update_agent_task(task_id, "cancelled")
     return {"message": "Task cancelled"}

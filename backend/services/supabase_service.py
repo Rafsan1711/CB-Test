@@ -28,7 +28,11 @@ class SupabaseService:
         return res.data[0] if res.data else None
 
     async def update_user_github_token(self, user_id: str, token: str) -> dict:
-        res = self.client.table("users").update({"github_access_token": token}).eq("id", user_id).execute()
+        data = {
+            "github_access_token": token,
+            "updated_at": datetime.utcnow().isoformat()
+        }
+        res = self.client.table("users").update(data).eq("id", user_id).execute()
         return res.data[0] if res.data else {}
 
     # --- Repos ---
@@ -54,6 +58,7 @@ class SupabaseService:
         return res.data[0] if res.data else None
 
     async def update_repo(self, repo_id: str, data: dict) -> dict:
+        data["updated_at"] = datetime.utcnow().isoformat()
         res = self.client.table("repos").update(data).eq("id", repo_id).execute()
         return res.data[0] if res.data else {}
 
@@ -128,6 +133,7 @@ class SupabaseService:
         elif status in ["completed", "failed"]:
             data["completed_at"] = datetime.utcnow().isoformat()
             
+        data["updated_at"] = datetime.utcnow().isoformat()
         res = self.client.table("agent_tasks").update(data).eq("id", task_id).execute()
         return res.data[0] if res.data else {}
 

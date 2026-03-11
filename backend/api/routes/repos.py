@@ -61,7 +61,7 @@ async def deactivate_repo(repo_id: str, current_user: dict = Depends(get_current
 
 @router.get("/activity/all")
 async def get_all_activity(current_user: dict = Depends(get_current_user)):
-    user_id = current_user["uid"]
+    user_id = await get_user_id(current_user)
     # Get all repos for user
     repos = await db.get_repos_by_user(user_id)
     repo_ids = [r["id"] for r in repos]
