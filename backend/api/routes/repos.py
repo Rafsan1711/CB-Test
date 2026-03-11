@@ -211,8 +211,30 @@ async def sync_issues(repo_id: str, current_user: dict = Depends(get_current_use
     if not repo:
         raise HTTPException(status_code=404, detail="Repo not found")
         
-    await db.log_activity(repo_id, "issues_synced", "Synced issues from GitHub")
-    return {"message": "Issues synced successfully", "count": 12}
+    from services.github_service import github_svc
+    github_issues = await github_svc.list_open_issues(repo["github_full_name"])
+    
+    # Get existing issues to avoid duplicates
+    existing_issues = await db.get_issues_by_repo(repo_id)
+    existing_issue_numbers = {issue["github_issue_number"] for issue in existing_issues if issue.get("github_issue_number")}
+    
+    count = 0
+    for issue in github_issues:
+        if issue["number"] in existing_issue_numbers:
+            continue
+            
+        issue_data = {
+            "github_issue_number": issue["number"],
+            "title": issue["title"],
+            "body": issue["body"],
+            "status": "open",
+            "created_at": issue["created_at"]
+        }
+        await db.create_issue(repo_id, issue_data)
+        count += 1
+        
+    await db.log_activity(repo_id, "issues_synced", f"Synced {count} new issues from GitHub")
+    return {"message": "Issues synced successfully", "count": count}
 
 @router.get("/{repo_id}/stats")
 async def get_repo_stats(repo_id: str, current_user: dict = Depends(get_current_user)):

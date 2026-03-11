@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Architecture } from '../components/Architecture';
 import { 
   Bot, Github, Terminal, GitPullRequest, GitMerge, CheckCircle, 
   Code, Tag, Bug, FolderTree, Zap, Shield, ArrowRight, Menu, X, 
@@ -357,8 +358,8 @@ export const LandingPage: React.FC = () => {
             </motion.p>
             
             <motion.div variants={fadeUp} className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4">
-              <Link to="/login" className="w-full sm:w-auto px-8 py-4 bg-[#00FF88] hover:bg-[#00CC6A] text-[#0D1117] font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(0,255,136,0.3)] hover:shadow-[0_0_30px_rgba(0,255,136,0.5)] hover:-translate-y-1">
-                Start Free <ArrowRight className="w-5 h-5" />
+              <Link to="/docs?doc=setup" className="w-full sm:w-auto px-8 py-4 bg-[#00FF88] hover:bg-[#00CC6A] text-[#0D1117] font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(0,255,136,0.3)] hover:shadow-[0_0_30px_rgba(0,255,136,0.5)] hover:-translate-y-1">
+                Read Docs <ArrowRight className="w-5 h-5" />
               </Link>
               <a href="https://github.com" target="_blank" rel="noreferrer" className="w-full sm:w-auto px-8 py-4 bg-[#161B22] hover:bg-gray-800 text-white font-semibold rounded-xl border border-gray-700 transition-all flex items-center justify-center gap-2 hover:-translate-y-1">
                 <Github className="w-5 h-5" /> View on GitHub
@@ -585,6 +586,8 @@ export const LandingPage: React.FC = () => {
           </div>
         </div>
       </section>
+
+      <Architecture />
 
       {/* Section 8: Open Source Banner */}
       <section className="py-24 bg-gradient-to-r from-[#0D1117] via-[#00FF88]/10 to-[#0D1117] border-y border-[#00FF88]/20 text-center">

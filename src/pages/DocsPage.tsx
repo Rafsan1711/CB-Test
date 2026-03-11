@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import MarkdownPreview from '@uiw/react-markdown-preview';
 import { Search, BookOpen, Rocket, Sparkles, Server, Settings, Wrench, ExternalLink, ChevronDown, ChevronRight, Github } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -6,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 // Import markdown files
 import introDoc from '../../docs/introduction.md?raw';
 import gettingStartedDoc from '../../docs/getting-started.md?raw';
+import adminSetupDoc from '../../docs/admin-setup.md?raw';
 import issueManagementDoc from '../../docs/features/issue-management.md?raw';
 import codeWritingDoc from '../../docs/features/code-writing.md?raw';
 import prVerificationDoc from '../../docs/features/pr-verification.md?raw';
@@ -43,7 +45,8 @@ const DOCS_DATA: DocCategory[] = [
     title: 'Getting Started',
     icon: Rocket,
     items: [
-      { id: 'setup', title: 'Setup Guide', content: gettingStartedDoc, githubPath: 'docs/getting-started.md' }
+      { id: 'setup', title: 'User Setup Guide', content: gettingStartedDoc, githubPath: 'docs/getting-started.md' },
+      { id: 'admin-setup', title: 'Admin Setup Guide', content: adminSetupDoc, githubPath: 'docs/admin-setup.md' }
     ]
   },
   {
@@ -85,11 +88,19 @@ const DOCS_DATA: DocCategory[] = [
 ];
 
 export const DocsPage: React.FC = () => {
+  const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeDocId, setActiveDocId] = useState<string>('introduction');
+  const [activeDocId, setActiveDocId] = useState<string>(searchParams.get('doc') || 'introduction');
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({
     'features': true,
   });
+
+  useEffect(() => {
+    const doc = searchParams.get('doc');
+    if (doc) {
+      setActiveDocId(doc);
+    }
+  }, [searchParams]);
 
   const toggleCategory = (categoryId: string) => {
     setExpandedCategories(prev => ({
