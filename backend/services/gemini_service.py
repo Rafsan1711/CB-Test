@@ -1,12 +1,43 @@
 import asyncio
 import json
 import logging
+import httpx
 from google import genai
 from google.genai import types
 from config import settings
 from models.schemas import ConsensusSummary, VerificationResult
 
 logger = logging.getLogger(__name__)
+
+SYSTEM_PROMPT_ENGINEER = """
+You are ContriBot, a world-class autonomous software engineer with 20+ years of expertise.
+You operate on GitHub repositories and write production-quality, battle-tested code.
+
+Your operating principles:
+1. ALWAYS match the existing codebase's exact style, patterns, and architecture
+2. NEVER break existing functionality — always consider downstream effects  
+3. Write complete, working code — never leave TODOs or placeholders
+4. Follow the detected tech stack and naming conventions EXACTLY
+5. Consider security implications of every change
+6. Write meaningful commit messages following Conventional Commits spec
+7. Your code must pass linting and tests without modification
+
+Context you receive: Full repo context including ASCII tree, key files, tech stack, code patterns.
+Output: ONLY valid JSON matching the exact requested schema. No markdown, no explanations outside JSON.
+"""
+
+SYSTEM_PROMPT_REVIEWER = """
+You are ContriBot's code review specialist. You perform thorough, constructive code reviews.
+Analyze: correctness, security, performance, maintainability, test coverage, API design.
+Be specific — always reference file paths and line numbers when possible.
+Output: ONLY valid JSON.
+"""
+
+SYSTEM_PROMPT_ANALYST = """
+You are ContriBot's issue analyst. You classify, prioritize, and plan implementation for GitHub issues.
+You understand software development complexity deeply.
+Output: ONLY valid JSON.
+"""
 
 class GeminiService:
     # Model Constants
@@ -68,99 +99,92 @@ class GeminiService:
                 await asyncio.sleep(2 ** attempt)
 
     async def write_code_for_issue(self, repo_context: dict, issue: dict) -> dict:
-        system_prompt = """You are ContriBot, an expert autonomous software engineer. You write production-quality code. 
-Always follow the existing code style, patterns, and architecture of the repository.
-Return ONLY valid JSON matching the requested structure. No explanations outside JSON.
-Expected JSON format:
-{
-  "files_to_create": [{"path": "string", "content": "string"}],
-  "files_to_modify": [{"path": "string", "original": "string", "modified": "string"}],
-  "commit_message": "string",
-  "pr_title": "string",
-  "pr_body": "string",
-  "branch_name": "string"
-}"""
-        prompt = f"Repo Context:\n{json.dumps(repo_context)}\n\nIssue to resolve:\n{json.dumps(issue)}\n\nGenerate the code to resolve this issue."
-        
-        res = await self.generate(prompt, self.MODEL_PRO, system_prompt=system_prompt, json_mode=True)
-        return json.loads(res)
+        prompt = f"""
+Repo Context:
+{json.dumps(repo_context)}
 
-    async def review_code(self, diff: str, pr_title: str, repo_context: dict) -> dict:
-        system_prompt = """You are an expert code reviewer. Analyze the provided diff and PR title in the context of the repository.
-Return ONLY valid JSON matching the requested structure.
-Expected JSON format:
-{
-  "overall_quality": int (1-10),
-  "issues": ["string"],
-  "suggestions": ["string"],
-  "security_concerns": ["string"],
-  "approved": bool,
-  "summary": "string"
-}"""
-        prompt = f"Repo Context:\n{json.dumps(repo_context)}\n\nPR Title: {pr_title}\n\nDiff:\n{diff}\n\nReview this code."
-        
-        res = await self.generate(prompt, self.MODEL_FLASH, system_prompt=system_prompt, json_mode=True)
-        return json.loads(res)
+Issue Details:
+{json.dumps(issue)}
 
-    async def analyze_issue(self, issue_title: str, issue_body: str, repo_context: dict) -> dict:
-        system_prompt = """You are an expert project manager and technical lead. Analyze the issue and categorize it.
-Return ONLY valid JSON matching the requested structure.
-Expected JSON format:
-{
-  "type": "bug" | "feature" | "enhancement" | "docs" | "other",
-  "priority": "low" | "medium" | "high" | "critical",
-  "estimated_complexity": "simple" | "moderate" | "complex",
-  "labels": ["string"],
-  "requires_approval": bool,
-  "analysis_summary": "string"
-}"""
-        prompt = f"Repo Context:\n{json.dumps(repo_context)}\n\nIssue Title: {issue_title}\n\nIssue Body:\n{issue_body}\n\nAnalyze this issue."
-        
-        res = await self.generate(prompt, self.MODEL_FLASH, system_prompt=system_prompt, json_mode=True)
+Instruction: Generate a COMPLETE implementation. Consider all existing code patterns.
+Return ONLY valid JSON matching this schema:
+{{
+  "implementation_plan": ["step 1", "step 2"],
+  "files_to_create": [{{"path": "...", "content": "...", "reason": "..."}}],
+  "files_to_modify": [{{"path": "...", "original_snippet": "...", "modified_content": "...", "changes_description": "..."}}],
+  "files_to_delete": [],
+  "new_dependencies": [{{"name": "...", "version": "...", "reason": "..."}}],
+  "migration_required": false,
+  "migration_sql": null,
+  "commit_message": "feat(scope): description",
+  "pr_title": "...",
+  "pr_body": "## Summary\\n...\\n## Changes\\n...\\n## Testing\\n...",
+  "branch_name": "contribot/issue-{{number}}-{{slug}}",
+  "estimated_risk": "low|medium|high",
+  "testing_notes": "..."
+}}
+"""
+        res = await self.generate(prompt, self.MODEL_PRO, system_prompt=SYSTEM_PROMPT_ENGINEER, json_mode=True)
         return json.loads(res)
 
     async def verify_pr_multimodel(self, diff: str, pr_title: str, pr_body: str, repo_context: dict) -> ConsensusSummary:
-        prompt = f"Review this PR.\nTitle: {pr_title}\nBody: {pr_body}\nDiff:\n{diff}\nRepo Context: {json.dumps(repo_context)}"
-        system_prompt = """You are a strict code reviewer. Evaluate the PR for bugs, security issues, and best practices.
-Return ONLY valid JSON matching the requested structure.
-Expected JSON format:
-{
+        prompt = f"""
+Review this PR.
+Title: {pr_title}
+Body: {pr_body}
+Diff:
+{diff}
+
+Repo Context: {json.dumps(repo_context)}
+
+Return ONLY valid JSON matching this schema:
+{{
   "approved": bool,
   "score": int (1-10),
   "reasoning": "string",
   "issues_found": ["string"],
   "suggestions": ["string"]
-}"""
-        
+}}
+"""
         models = [self.MODEL_PRO, self.MODEL_FLASH, self.MODEL_STABLE_PRO, self.MODEL_STABLE_FLASH]
         
         # Run all models in parallel
-        tasks = [self.generate(prompt, m, system_prompt=system_prompt, json_mode=True) for m in models]
+        tasks = [self.generate(prompt, m, system_prompt=SYSTEM_PROMPT_REVIEWER, json_mode=True) for m in models]
         results_json = await asyncio.gather(*tasks, return_exceptions=True)
         
         parsed_results = []
+        weighted_score = 0
+        max_weight = 5 # PRO=2, others=1 => 2 + 1 + 1 + 1 = 5
+        
         for i, res in enumerate(results_json):
+            model_name = models[i]
+            weight = 2 if model_name == self.MODEL_PRO else 1
+            
             if isinstance(res, Exception):
                 parsed_results.append(VerificationResult(
-                    model_name=models[i],
+                    model_name=model_name,
                     approved=False,
                     score=1,
-                    reasoning=f"Model failed: {str(res)}",
+                    reasoning=f"Model unavailable: {str(res)}",
                     issues_found=[]
                 ))
             else:
                 try:
                     data = json.loads(res)
+                    approved = data.get("approved", False)
+                    if approved:
+                        weighted_score += weight
+                        
                     parsed_results.append(VerificationResult(
-                        model_name=models[i],
-                        approved=data.get("approved", False),
+                        model_name=model_name,
+                        approved=approved,
                         score=data.get("score", 1),
                         reasoning=data.get("reasoning", "No reasoning provided."),
                         issues_found=data.get("issues_found", [])
                     ))
                 except Exception as e:
                     parsed_results.append(VerificationResult(
-                        model_name=models[i],
+                        model_name=model_name,
                         approved=False,
                         score=1,
                         reasoning=f"Failed to parse JSON: {str(e)}",
@@ -168,7 +192,7 @@ Expected JSON format:
                     ))
         
         consensus_score = sum(1 for r in parsed_results if r.approved)
-        safe_to_merge = consensus_score >= 3
+        safe_to_merge = weighted_score >= 4
         
         # Generate overall summary using the lightest model
         summary_prompt = f"Summarize these PR verification results from multiple AI models into a single concise paragraph:\n{json.dumps([r.model_dump() for r in parsed_results])}"
@@ -180,6 +204,77 @@ Expected JSON format:
             safe_to_merge=safe_to_merge,
             summary=summary
         )
+
+    async def analyze_issue(self, issue_title: str, issue_body: str, repo_context: dict) -> dict:
+        prompt = f"""
+Repo Context:
+{json.dumps(repo_context)}
+
+Issue Title: {issue_title}
+Issue Body:
+{issue_body}
+
+Analyze this issue. Return ONLY valid JSON matching this schema:
+{{
+  "type": "bug|feature|enhancement|docs|refactor|security|performance|other",
+  "priority": "critical|high|medium|low",
+  "estimated_complexity": "trivial|simple|moderate|complex|epic",
+  "estimated_time_hours": 2,
+  "labels": ["..."],
+  "requires_approval": true,
+  "affected_components": ["auth", "api"],
+  "implementation_hints": ["..."],
+  "similar_issues_pattern": "...",
+  "breaking_change_risk": false,
+  "analysis_summary": "...",
+  "questions_for_owner": ["..."]
+}}
+"""
+        res = await self.generate(prompt, self.MODEL_FLASH, system_prompt=SYSTEM_PROMPT_ANALYST, json_mode=True)
+        return json.loads(res)
+
+    async def call_external_api(self, api_description: str, purpose: str) -> dict:
+        """Allow ContriBot to call external APIs for context."""
+        prompt = f"""
+You need to call an external API for the following purpose: {purpose}
+API Description/Context: {api_description}
+
+Determine the exact GET URL to call. Supported registries: npm, PyPI, GitHub API (public repos), or REST APIs with no auth.
+Return ONLY valid JSON matching this schema:
+{{
+  "url": "https://...",
+  "reason": "..."
+}}
+"""
+        try:
+            res = await self.generate(prompt, self.MODEL_FLASH_LITE, json_mode=True)
+            data = json.loads(res)
+            url = data.get("url")
+            
+            if not url or not url.startswith("http"):
+                return {"api_called": None, "response_summary": "Invalid URL generated.", "useful_data": None}
+                
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                api_data = response.json()
+                
+            # Summarize the response using Gemini
+            summary_prompt = f"Summarize this API response for the purpose of {purpose}. Extract only the useful data.\n\nResponse:\n{json.dumps(api_data)[:5000]}"
+            summary = await self.generate(summary_prompt, self.MODEL_FLASH_LITE)
+            
+            return {
+                "api_called": url,
+                "response_summary": summary,
+                "useful_data": api_data
+            }
+        except Exception as e:
+            logger.error(f"Failed to call external API: {e}")
+            return {
+                "api_called": url if 'url' in locals() else None,
+                "response_summary": f"Failed to call API: {str(e)}",
+                "useful_data": None
+            }
 
     async def determine_version_bump(self, pr_titles: list[str], commit_messages: list[str], current_version: str) -> dict:
         system_prompt = """You are an expert release manager. Determine the next semantic version based on the changes.

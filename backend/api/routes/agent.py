@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 from api.middleware.firebase_auth import get_current_user
 from services.supabase_service import db
+from services.agent_orchestrator import orchestrator
 from models.schemas import AgentTaskResponse
 
 router = APIRouter()
@@ -13,14 +14,20 @@ async def list_tasks(repo_id: Optional[str] = Query(None), status: Optional[str]
 
 @router.get("/tasks/{task_id}", response_model=AgentTaskResponse)
 async def get_task(task_id: str, current_user: dict = Depends(get_current_user)):
-    raise HTTPException(status_code=501, detail="Not implemented")
+    task = await db.get_agent_task_by_id(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
 
 @router.post("/tasks/{task_id}/retry")
 async def retry_task(task_id: str, current_user: dict = Depends(get_current_user)):
-    await db.update_agent_task(task_id, "pending", error=None)
-    return {"message": "Task queued for retry"}
+    try:
+        await orchestrator.retry_task(task_id)
+        return {"message": "Task queued for retry"}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 @router.delete("/tasks/{task_id}")
 async def cancel_task(task_id: str, current_user: dict = Depends(get_current_user)):
-    await db.update_agent_task(task_id, "cancelled")
+    await db.update_agent_task(task_id, {"status": "cancelled"})
     return {"message": "Task cancelled"}

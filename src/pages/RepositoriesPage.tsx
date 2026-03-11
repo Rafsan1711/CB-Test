@@ -38,6 +38,17 @@ export const RepositoriesPage: React.FC = () => {
     }
   });
 
+  const removeRepoMutation = useMutation({
+    mutationFn: (id: string) => apiService.repos.removeRepo(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['repos'] });
+      toast.success('Repository removed successfully');
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Failed to remove repository');
+    }
+  });
+
   const handleAddRepo = (e: React.FormEvent) => {
     e.preventDefault();
     if (!repoName.includes('/')) {
@@ -80,6 +91,7 @@ export const RepositoriesPage: React.FC = () => {
               key={repo.id} 
               repo={repo} 
               onToggleActive={(id, active) => toggleActiveMutation.mutate({ id, active })} 
+              onRemove={(id) => removeRepoMutation.mutate(id)}
             />
           ))}
         </div>

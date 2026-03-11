@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiService, Issue } from '../lib/api';
 import { IssueApprovalCard } from '../components/IssueApprovalCard';
-import { AlertCircle, CheckCircle2, Clock, PlayCircle, XCircle, Tag } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock, PlayCircle, XCircle, Tag, RefreshCw } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -17,6 +17,14 @@ export const IssuesPage: React.FC<IssuesPageProps> = ({ repoId }) => {
   const { data: issues, isLoading } = useQuery({
     queryKey: ['issues', repoId, filter],
     queryFn: () => apiService.issues.listIssues(repoId, filter === 'all' ? undefined : filter)
+  });
+
+  const syncIssuesMutation = useMutation({
+    mutationFn: () => apiService.repos.syncIssues(repoId),
+    onSuccess: (data) => {
+      toast.success(`Synced ${data.count} issues from GitHub`);
+      queryClient.invalidateQueries({ queryKey: ['issues', repoId] });
+    }
   });
 
   const respondMutation = useMutation({
@@ -86,20 +94,30 @@ export const IssuesPage: React.FC<IssuesPageProps> = ({ repoId }) => {
 
   return (
     <div className="space-y-6">
-      <div className="flex gap-2 overflow-x-auto pb-2">
-        {filters.map(f => (
-          <button
-            key={f.id}
-            onClick={() => setFilter(f.id)}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
-              filter === f.id 
-                ? 'bg-gray-800 text-gray-100 border border-gray-700' 
-                : 'bg-transparent text-gray-400 hover:text-gray-200 hover:bg-gray-900 border border-transparent'
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
+      <div className="flex justify-between items-center pb-2">
+        <div className="flex gap-2 overflow-x-auto">
+          {filters.map(f => (
+            <button
+              key={f.id}
+              onClick={() => setFilter(f.id)}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
+                filter === f.id 
+                  ? 'bg-gray-800 text-gray-100 border border-gray-700' 
+                  : 'bg-transparent text-gray-400 hover:text-gray-200 hover:bg-gray-900 border border-transparent'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => syncIssuesMutation.mutate()}
+          disabled={syncIssuesMutation.isPending}
+          className="flex items-center gap-2 px-4 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-200 text-sm font-medium rounded-lg transition-colors border border-gray-700"
+        >
+          <RefreshCw className={`w-4 h-4 ${syncIssuesMutation.isPending ? 'animate-spin' : ''}`} />
+          {syncIssuesMutation.isPending ? 'Syncing...' : 'Sync from GitHub'}
+        </button>
       </div>
 
       {issues?.length === 0 ? (

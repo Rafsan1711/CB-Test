@@ -22,6 +22,17 @@ export const DashboardPage: React.FC = () => {
     }
   });
 
+  const removeRepoMutation = useMutation({
+    mutationFn: (id: string) => apiService.repos.removeRepo(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['repos'] });
+      toast.success('Repository removed successfully');
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || 'Failed to remove repository');
+    }
+  });
+
   const activeRepos = repos?.filter(r => r.contribot_active) || [];
 
   return (
@@ -59,6 +70,7 @@ export const DashboardPage: React.FC = () => {
               key={repo.id} 
               repo={repo} 
               onToggleActive={(id, active) => toggleActiveMutation.mutate({ id, active })} 
+              onRemove={(id) => removeRepoMutation.mutate(id)}
             />
           ))}
         </div>

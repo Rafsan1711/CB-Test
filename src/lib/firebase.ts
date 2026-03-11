@@ -16,6 +16,7 @@ const auth = getAuth(app);
 const googleProvider = new GoogleAuthProvider();
 const githubProvider = new GithubAuthProvider();
 githubProvider.addScope('repo');
+githubProvider.addScope('workflow');
 githubProvider.addScope('read:user');
 githubProvider.addScope('user:email');
 

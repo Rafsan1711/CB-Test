@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import List
 from api.middleware.firebase_auth import get_current_user
 from services.supabase_service import db
+from services.agent_orchestrator import orchestrator
 from models.schemas import PRResponse
 
 router = APIRouter()
@@ -21,7 +22,7 @@ async def get_pr(repo_id: str, pr_id: str, current_user: dict = Depends(get_curr
 
 @router.post("/{repo_id}/prs/{pr_id}/verify")
 async def verify_pr(repo_id: str, pr_id: str, current_user: dict = Depends(get_current_user)):
-    await db.create_agent_task(repo_id, "verify_pr", {"pr_id": pr_id})
+    await orchestrator.enqueue_task(repo_id, "verify_pr", {"pr_id": pr_id})
     await db.log_activity(repo_id, "pr_verification_started", f"Verification started for PR {pr_id}")
     return {"message": "Verification task created"}
 

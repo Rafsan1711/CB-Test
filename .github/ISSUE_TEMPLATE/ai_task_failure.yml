@@ -1,0 +1,41 @@
+name: AI Task Failure
+description: Report when ContriBot's AI tasks fail
+title: "[AI FAILURE] "
+labels: ["ai-failure", "bug"]
+body:
+  - type: dropdown
+    id: task_type
+    attributes:
+      label: Task Type
+      options:
+        - code_writing
+        - pr_verification
+        - issue_analysis
+        - release
+        - version_bump
+    validations:
+      required: true
+  - type: input
+    id: repo_name
+    attributes:
+      label: Affected repository full name
+    validations:
+      required: true
+  - type: input
+    id: task_id
+    attributes:
+      label: Task ID from ContriBot dashboard
+    validations:
+      required: false
+  - type: textarea
+    id: failure_description
+    attributes:
+      label: Failure description
+    validations:
+      required: true
+  - type: textarea
+    id: gemini_response
+    attributes:
+      label: What did Gemini return?
+    validations:
+      required: false

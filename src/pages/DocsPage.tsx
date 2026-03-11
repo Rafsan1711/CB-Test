@@ -25,7 +25,7 @@ type DocItem = {
 type DocCategory = {
   id: string;
   title: string;
-  icon: React.ElementType;
+  icon: any;
   items: DocItem[];
 };
 
@@ -98,7 +98,7 @@ export const DocsPage: React.FC = () => {
     }));
   };
 
-  const filteredDocs = useMemo(() => {
+  const filteredDocs = useMemo((): DocCategory[] => {
     if (!searchQuery.trim()) return DOCS_DATA;
     
     const query = searchQuery.toLowerCase();

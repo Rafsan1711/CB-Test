@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiService } from '../lib/api';
-import { Activity, AlertCircle, GitPullRequest, Tag, Settings2, ArrowLeft, Bot, Clock } from 'lucide-react';
+import { Activity, AlertCircle, GitPullRequest, Tag, Settings2, ArrowLeft, Bot, Clock, ShieldAlert, RefreshCw, FileCode2, Terminal, CheckCircle2, XCircle } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 import { IssuesPage } from './IssuesPage';
@@ -14,7 +14,8 @@ export const RepoDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'overview' | 'issues' | 'prs' | 'releases' | 'activity'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'issues' | 'prs' | 'releases' | 'activity' | 'errors'>('overview');
+  const [isContextExpanded, setIsContextExpanded] = useState(false);
 
   const { data: repo, isLoading: repoLoading } = useQuery({
     queryKey: ['repo', id],
@@ -26,6 +27,40 @@ export const RepoDetailPage: React.FC = () => {
     queryKey: ['repo-activity', id],
     queryFn: () => apiService.repos.getActivity(id!),
     enabled: !!id && activeTab === 'overview'
+  });
+
+  const { data: health } = useQuery({
+    queryKey: ['repo-health', id],
+    queryFn: () => apiService.repos.getHealth(id!),
+    enabled: !!id && activeTab === 'overview'
+  });
+
+  const { data: context } = useQuery({
+    queryKey: ['repo-context', id],
+    queryFn: () => apiService.repos.getContext(id!),
+    enabled: !!id && activeTab === 'overview'
+  });
+
+  const { data: errors, refetch: refetchErrors } = useQuery({
+    queryKey: ['repo-errors', id],
+    queryFn: () => apiService.repos.getErrors(id!),
+    enabled: !!id && activeTab === 'errors'
+  });
+
+  const rebuildContextMutation = useMutation({
+    mutationFn: () => apiService.repos.analyzeRepo(id!),
+    onSuccess: () => {
+      toast.success('Context rebuild started');
+      queryClient.invalidateQueries({ queryKey: ['repo-context', id] });
+    }
+  });
+
+  const resolveErrorMutation = useMutation({
+    mutationFn: (errorId: string) => apiService.repos.resolveError(id!, errorId),
+    onSuccess: () => {
+      toast.success('Error marked as resolved');
+      refetchErrors();
+    }
   });
 
   const toggleActiveMutation = useMutation({
@@ -45,13 +80,14 @@ export const RepoDetailPage: React.FC = () => {
     return <div className="text-red-400">Repository not found.</div>;
   }
 
-  const tabs = [
+  const tabs: { id: 'overview' | 'issues' | 'prs' | 'releases' | 'activity' | 'errors', label: string, icon: any, badge?: number }[] = [
     { id: 'overview', label: 'Overview', icon: Activity },
     { id: 'issues', label: 'Issues', icon: AlertCircle },
     { id: 'prs', label: 'Pull Requests', icon: GitPullRequest },
     { id: 'releases', label: 'Releases', icon: Tag },
     { id: 'activity', label: 'Activity Log', icon: Clock },
-  ] as const;
+    { id: 'errors', label: 'Errors', icon: ShieldAlert, badge: health?.error_count_24h || 0 },
+  ];
 
   return (
     <div className="space-y-8">
@@ -117,6 +153,11 @@ export const RepoDetailPage: React.FC = () => {
             >
               <tab.icon className="w-4 h-4" />
               {tab.label}
+              {tab.badge ? (
+                <span className="ml-2 px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 text-xs font-bold">
+                  {tab.badge}
+                </span>
+              ) : null}
               {activeTab === tab.id && (
                 <span className="absolute bottom-0 left-0 w-full h-0.5 bg-green-400 rounded-t-full" />
               )}
@@ -179,6 +220,103 @@ export const RepoDetailPage: React.FC = () => {
             </div>
 
             <div className="space-y-6">
+              {/* Repo Health Dashboard */}
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+                <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <Activity className="w-4 h-4" /> Repo Health
+                </h3>
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <p className="text-xs text-gray-500">Webhook Status</p>
+                    <div className="flex items-center gap-1.5">
+                      {health?.webhook_status === 'active' ? (
+                        <><CheckCircle2 className="w-4 h-4 text-green-400" /><span className="text-sm text-green-400">Active</span></>
+                      ) : (
+                        <><XCircle className="w-4 h-4 text-red-400" /><span className="text-sm text-red-400">Inactive</span></>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <p className="text-xs text-gray-500">Last Webhook</p>
+                    <p className="text-sm text-gray-200">{health?.last_webhook || 'Never'}</p>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <p className="text-xs text-gray-500">Task Queue</p>
+                    <p className="text-sm text-gray-200">{health?.tasks_running} running, {health?.tasks_queued} queued</p>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <p className="text-xs text-gray-500">API Rate Limit</p>
+                    <p className="text-sm text-gray-200">{health?.rate_limit_remaining || 'Unknown'} remaining</p>
+                  </div>
+                  <div className="flex justify-between items-center pt-2 border-t border-gray-800">
+                    <p className="text-xs text-gray-500">Errors (24h)</p>
+                    <button 
+                      onClick={() => setActiveTab('errors')}
+                      className={`text-sm font-bold px-2.5 py-1 rounded-full ${health?.error_count_24h ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'bg-gray-800 text-gray-400'}`}
+                    >
+                      {health?.error_count_24h || 0}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Context Panel */}
+              <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                <div 
+                  className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-800/50 transition-colors"
+                  onClick={() => setIsContextExpanded(!isContextExpanded)}
+                >
+                  <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider flex items-center gap-2">
+                    <FileCode2 className="w-4 h-4" /> Repo Context
+                  </h3>
+                  <button className="text-gray-500 hover:text-gray-300">
+                    {isContextExpanded ? 'Collapse' : 'Expand'}
+                  </button>
+                </div>
+                
+                {isContextExpanded && context && (
+                  <div className="p-4 border-t border-gray-800 space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Main Language</p>
+                        <p className="text-sm text-gray-200">{context.main_language}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Files Indexed</p>
+                        <p className="text-sm text-gray-200">{context.file_count}</p>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">Tech Stack</p>
+                      <div className="flex flex-wrap gap-2">
+                        {context.tech_stack.map((tech: string) => (
+                          <span key={tech} className="px-2 py-1 bg-gray-800 rounded text-xs text-gray-300">{tech}</span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1 flex items-center gap-2">
+                        <Terminal className="w-3 h-3" /> Directory Tree
+                      </p>
+                      <pre className="text-xs text-gray-400 bg-gray-950 p-3 rounded-lg overflow-x-auto border border-gray-800">
+                        {context.tree}
+                      </pre>
+                    </div>
+
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); rebuildContextMutation.mutate(); }}
+                      disabled={rebuildContextMutation.isPending}
+                      className="w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-200 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${rebuildContextMutation.isPending ? 'animate-spin' : ''}`} />
+                      {rebuildContextMutation.isPending ? 'Rebuilding...' : 'Rebuild Context'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
                 <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-4">Bot Status</h3>
                 <div className="space-y-4">
@@ -203,6 +341,78 @@ export const RepoDetailPage: React.FC = () => {
         {activeTab === 'prs' && <PRsPage repoId={repo.id} />}
         {activeTab === 'releases' && <ReleasesPage repoId={repo.id} />}
         {activeTab === 'activity' && <ActivityFeed repoId={repo.id} />}
+        {activeTab === 'errors' && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+            <div className="p-6 border-b border-gray-800 flex justify-between items-center">
+              <h2 className="text-lg font-semibold text-gray-100 flex items-center gap-2">
+                <ShieldAlert className="w-5 h-5 text-red-400" /> Error Logs
+              </h2>
+            </div>
+            
+            {errors?.length === 0 ? (
+              <div className="p-12 text-center text-gray-500">
+                <CheckCircle2 className="w-12 h-12 mx-auto mb-4 text-green-500/50" />
+                <p>No errors found in the last 72 hours.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-gray-950/50 text-gray-400 uppercase text-xs">
+                    <tr>
+                      <th className="px-6 py-4 font-medium">Time</th>
+                      <th className="px-6 py-4 font-medium">Category</th>
+                      <th className="px-6 py-4 font-medium">Severity</th>
+                      <th className="px-6 py-4 font-medium">Message</th>
+                      <th className="px-6 py-4 font-medium text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800">
+                    {errors?.map((error: any) => (
+                      <tr key={error.id} className={`hover:bg-gray-800/50 transition-colors ${error.resolved ? 'opacity-50' : ''}`}>
+                        <td className="px-6 py-4 text-gray-400 whitespace-nowrap">
+                          {formatDistanceToNow(new Date(error.created_at), { addSuffix: true })}
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="px-2.5 py-1 rounded-md bg-gray-800 text-gray-300 text-xs font-mono">
+                            {error.category}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
+                            error.severity === 'critical' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                            error.severity === 'warning' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
+                            'bg-orange-500/10 text-orange-400 border-orange-500/20'
+                          }`}>
+                            {error.severity === 'critical' && !error.resolved && <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse"></span>}
+                            {error.severity}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-gray-300 max-w-md truncate" title={error.message}>
+                          {error.message}
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          {!error.resolved ? (
+                            <button 
+                              onClick={() => resolveErrorMutation.mutate(error.id)}
+                              disabled={resolveErrorMutation.isPending}
+                              className="text-xs font-medium text-green-400 hover:text-green-300 bg-green-400/10 hover:bg-green-400/20 px-3 py-1.5 rounded transition-colors"
+                            >
+                              Mark Resolved
+                            </button>
+                          ) : (
+                            <span className="text-xs text-gray-500 flex items-center justify-end gap-1">
+                              <CheckCircle2 className="w-3 h-3" /> Resolved
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

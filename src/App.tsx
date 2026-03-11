@@ -8,20 +8,24 @@ import { RepositoriesPage } from './pages/RepositoriesPage';
 import { RepoDetailPage } from './pages/RepoDetailPage';
 import { TasksPage } from './pages/TasksPage';
 import { DocsPage } from './pages/DocsPage';
+import { SettingsPage } from './pages/SettingsPage';
+import { LandingPage } from './pages/LandingPage';
+import { AnalyticsPage } from './pages/AnalyticsPage';
+import { CommandPalette } from './components/CommandPalette';
+import { TaskProgressCard } from './components/TaskProgressCard';
 import { Toaster } from 'react-hot-toast';
 
 // Placeholder components for other routes
 const ReleasesPage = () => <div className="text-gray-400">Releases Page</div>;
-const SettingsPage = () => <div className="text-gray-400">Settings Page</div>;
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { user, loading } = useAuth();
+  const { supabaseUser, loading } = useAuth();
   
   if (loading) {
     return <div className="min-h-screen bg-gray-950 flex items-center justify-center text-green-400">Loading...</div>;
   }
   
-  if (!user) {
+  if (!supabaseUser) {
     return <Navigate to="/login" replace />;
   }
   
@@ -29,7 +33,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 };
 
 const AppRoutes = () => {
-  const { user, loading } = useAuth();
+  const { loading } = useAuth();
 
   if (loading) {
     return <div className="min-h-screen bg-gray-950 flex items-center justify-center text-green-400">Loading...</div>;
@@ -37,14 +41,15 @@ const AppRoutes = () => {
 
   return (
     <Routes>
+      <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />} />
       
       <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/repos" element={<RepositoriesPage />} />
         <Route path="/repos/:id/*" element={<RepoDetailPage />} />
         <Route path="/tasks" element={<TasksPage />} />
+        <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/docs" element={<DocsPage />} />
         <Route path="/releases" element={<ReleasesPage />} />
         <Route path="/settings" element={<SettingsPage />} />
@@ -53,11 +58,23 @@ const AppRoutes = () => {
   );
 };
 
+const GlobalComponents = () => {
+  const { supabaseUser } = useAuth();
+  if (!supabaseUser) return null;
+  return (
+    <>
+      <CommandPalette />
+      <TaskProgressCard />
+    </>
+  );
+};
+
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
         <AppRoutes />
+        <GlobalComponents />
         <Toaster 
           position="bottom-right"
           toastOptions={{

@@ -1,8 +1,11 @@
 import React from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth-context';
-import { LayoutDashboard, FolderGit2, ListTodo, Tag, Settings, LogOut, Bell, BookOpen } from 'lucide-react';
+import { LayoutDashboard, FolderGit2, ListTodo, Tag, Settings, LogOut, BookOpen, Activity } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { GitHubLinkBanner } from './GitHubLinkBanner';
+import { RepoSelector } from './RepoSelector';
+import { NotificationCenter } from './NotificationCenter';
 
 export const Layout: React.FC = () => {
   const { supabaseUser, signOut } = useAuth();
@@ -12,6 +15,7 @@ export const Layout: React.FC = () => {
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/repos', label: 'Repositories', icon: FolderGit2 },
     { path: '/tasks', label: 'Tasks', icon: ListTodo },
+    { path: '/analytics', label: 'Analytics', icon: Activity },
     { path: '/docs', label: 'Documentation', icon: BookOpen },
     { path: '/releases', label: 'Releases', icon: Tag },
     { path: '/settings', label: 'Settings', icon: Settings },
@@ -72,13 +76,14 @@ export const Layout: React.FC = () => {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <GitHubLinkBanner />
         <header className="h-16 border-b border-gray-800 bg-gray-950/50 backdrop-blur-md flex items-center justify-between px-8 sticky top-0 z-10">
-          <h1 className="text-xl font-semibold">{getPageTitle()}</h1>
+          <div className="flex items-center gap-6">
+            <h1 className="text-xl font-semibold">{getPageTitle()}</h1>
+            <RepoSelector />
+          </div>
           <div className="flex items-center gap-4">
-            <button className="p-2 text-gray-400 hover:text-gray-100 transition-colors relative">
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-blue-500 rounded-full"></span>
-            </button>
+            <NotificationCenter />
           </div>
         </header>
         <div className="flex-1 overflow-auto p-8">

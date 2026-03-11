@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_BACKEND_URL + '/api/v1',
+  timeout: 15000, // 15 seconds timeout to allow HF Spaces to wake up
 });
 
 api.interceptors.request.use(async (config) => {
@@ -17,9 +18,13 @@ api.interceptors.request.use(async (config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      window.location.href = '/login';
-    } else {
+    const isAuthEndpoint = error.config?.url?.includes('/auth/me') || error.config?.url?.includes('/auth/login');
+    
+    if (error.response?.status === 401 && !isAuthEndpoint) {
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+    } else if (!isAuthEndpoint) {
       toast.error(error.response?.data?.detail || error.message || 'An error occurred');
     }
     return Promise.reject(error);
@@ -32,6 +37,9 @@ export interface User {
   email: string;
   github_username?: string;
   avatar_url?: string;
+  providers?: string[];
+  github_token_scopes?: string[];
+  settings?: any;
   created_at: string;
 }
 
@@ -122,6 +130,10 @@ export const apiService = {
       const res = await api.get<User>('/auth/me');
       return res.data;
     },
+    updateSettings: async (settings: any) => {
+      const res = await api.put<User>('/auth/settings', settings);
+      return res.data;
+    },
     logout: async () => {
       const res = await api.post('/auth/logout');
       return res.data;
@@ -152,8 +164,52 @@ export const apiService = {
       const res = await api.post<Repo>(`/repos/${id}/deactivate`);
       return res.data;
     },
+    removeRepo: async (id: string) => {
+      const res = await api.delete(`/repos/${id}`);
+      return res.data;
+    },
     getActivity: async (id: string) => {
       const res = await api.get<ActivityLog[]>(`/repos/${id}/activity`);
+      return res.data;
+    },
+    getAllActivity: async () => {
+      const res = await api.get<ActivityLog[]>('/repos/activity/all');
+      return res.data;
+    },
+    getGlobalAnalytics: async () => {
+      const res = await api.get<any>('/repos/analytics/global');
+      return res.data;
+    },
+    analyzeRepo: async (id: string) => {
+      const res = await api.post(`/repos/${id}/analyze`);
+      return res.data;
+    },
+    getContext: async (id: string) => {
+      const res = await api.get(`/repos/${id}/context`);
+      return res.data;
+    },
+    getHealth: async (id: string) => {
+      const res = await api.get(`/repos/${id}/health`);
+      return res.data;
+    },
+    installTemplates: async (id: string) => {
+      const res = await api.post(`/repos/${id}/install-templates`);
+      return res.data;
+    },
+    getErrors: async (id: string) => {
+      const res = await api.get(`/repos/${id}/errors`);
+      return res.data;
+    },
+    resolveError: async (id: string, errorId: string) => {
+      const res = await api.post(`/repos/${id}/errors/${errorId}/resolve`);
+      return res.data;
+    },
+    syncIssues: async (id: string) => {
+      const res = await api.post(`/repos/${id}/sync-issues`);
+      return res.data;
+    },
+    getStats: async (id: string) => {
+      const res = await api.get(`/repos/${id}/stats`);
       return res.data;
     }
   },

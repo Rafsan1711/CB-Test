@@ -5,16 +5,16 @@ import { Github, Mail, Bot, GitPullRequest, Rocket, CheckCircle2, ArrowRight, Te
 import { motion } from 'framer-motion';
 
 export const LoginPage: React.FC = () => {
-  const { user, signInWithGoogle, signInWithGitHub } = useAuth();
+  const { supabaseUser, signInWithGoogle, signInWithGitHub } = useAuth();
   const navigate = useNavigate();
   const [isLoadingGithub, setIsLoadingGithub] = useState(false);
   const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
 
   useEffect(() => {
-    if (user) {
+    if (supabaseUser) {
       navigate('/dashboard');
     }
-  }, [user, navigate]);
+  }, [supabaseUser, navigate]);
 
   const handleGithubLogin = async () => {
     setIsLoadingGithub(true);
@@ -60,8 +60,8 @@ export const LoginPage: React.FC = () => {
 
         <div className="relative z-10">
           <div className="flex items-center gap-3 mb-16">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-400 to-blue-500 flex items-center justify-center text-xl shadow-lg shadow-green-500/20">
-              🤖
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-400 to-blue-500 flex items-center justify-center shadow-lg shadow-green-500/20 overflow-hidden">
+              <img src="/contribot-logo.png" alt="ContriBot Logo" className="w-full h-full object-cover" />
             </div>
             <span className="text-2xl font-bold tracking-tight">ContriBot</span>
           </div>
@@ -130,8 +130,8 @@ export const LoginPage: React.FC = () => {
       <div className="w-full lg:w-1/2 flex flex-col items-center justify-center p-8 relative">
         {/* Mobile Header */}
         <div className="lg:hidden absolute top-8 left-8 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-green-400 to-blue-500 flex items-center justify-center text-sm shadow-lg shadow-green-500/20">
-            🤖
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-green-400 to-blue-500 flex items-center justify-center shadow-lg shadow-green-500/20 overflow-hidden">
+            <img src="/contribot-logo.png" alt="ContriBot Logo" className="w-full h-full object-cover" />
           </div>
           <span className="text-xl font-bold tracking-tight">ContriBot</span>
         </div>

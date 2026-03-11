@@ -17,6 +17,7 @@ class UserResponse(BaseModel):
     github_username: Optional[str] = None
     github_access_token: Optional[str] = None
     avatar_url: Optional[str] = None
+    settings: Optional[Dict[str, Any]] = None
     created_at: datetime
 
 class UserUpdate(BaseModel):

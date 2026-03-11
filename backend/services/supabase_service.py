@@ -57,6 +57,17 @@ class SupabaseService:
         res = self.client.table("repos").update(data).eq("id", repo_id).execute()
         return res.data[0] if res.data else {}
 
+    async def delete_repo(self, repo_id: str) -> bool:
+        # Delete related records first to avoid foreign key constraints
+        self.client.table("activity_log").delete().eq("repo_id", repo_id).execute()
+        self.client.table("tasks").delete().eq("repo_id", repo_id).execute()
+        self.client.table("prs").delete().eq("repo_id", repo_id).execute()
+        self.client.table("issues").delete().eq("repo_id", repo_id).execute()
+        
+        # Finally delete the repo
+        res = self.client.table("repos").delete().eq("id", repo_id).execute()
+        return True
+
     # --- Issues ---
     async def create_issue(self, repo_id: str, data: dict) -> dict:
         data["repo_id"] = repo_id
@@ -124,6 +135,10 @@ class SupabaseService:
             query = query.eq("repo_id", repo_id)
         res = query.execute()
         return res.data
+
+    async def get_agent_task_by_id(self, task_id: str) -> Optional[dict]:
+        res = self.client.table("agent_tasks").select("*").eq("id", task_id).execute()
+        return res.data[0] if res.data else None
 
     # --- Releases ---
     async def create_release(self, repo_id: str, version: str, bump_type: str, release_notes: str, github_release_url: str, tag_name: str) -> dict:
