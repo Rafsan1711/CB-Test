@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from typing import List, Optional
 from api.middleware.firebase_auth import get_current_user
 from services.supabase_service import db
-from services.repo_context_service import repo_ctx
+from services.repo_context_service import repo_context_service
 from services.agent_orchestrator import orchestrator
 from services.error_service import error_service, ErrorCategory
 from models.schemas import RepoCreate, RepoResponse, RepoUpdate
@@ -153,7 +153,7 @@ async def get_repo_context(repo_id: str, current_user: dict = Depends(get_curren
     if not repo:
         raise HTTPException(status_code=404, detail="Repo not found")
         
-    context = await repo_ctx.get_context(repo_id, repo["github_full_name"])
+    context = await repo_context_service.get_context(repo_id, repo["github_full_name"])
     
     return {
         "last_built": context.get("context_built_at"),

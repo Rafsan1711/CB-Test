@@ -262,4 +262,4 @@ Repository Tree:
         focus_paths = await self.get_relevant_files_for_issue(full_name, title, body)
         return await self.build_full_context(full_name, focus_paths)
 
-repo_ctx = RepoContextService()
+repo_context_service = RepoContextService()
