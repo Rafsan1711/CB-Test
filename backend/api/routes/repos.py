@@ -63,7 +63,7 @@ async def deactivate_repo(repo_id: str, current_user: dict = Depends(get_current
 async def get_all_activity(current_user: dict = Depends(get_current_user)):
     user_id = current_user["uid"]
     # Get all repos for user
-    repos = await db.get_user_repos(user_id)
+    repos = await db.get_repos_by_user(user_id)
     repo_ids = [r["id"] for r in repos]
     
     if not repo_ids:
@@ -101,10 +101,10 @@ async def get_global_analytics(current_user: dict = Depends(get_current_user)):
         issues_res = db.client.table("issues").select("id", count="exact").execute()
         total_issues = issues_res.count if hasattr(issues_res, 'count') else len(issues_res.data)
         
-        prs_res = db.client.table("prs").select("id", count="exact").execute()
+        prs_res = db.client.table("pull_requests").select("id", count="exact").execute()
         total_prs = prs_res.count if hasattr(prs_res, 'count') else len(prs_res.data)
         
-        tasks_res = db.client.table("tasks").select("id, status", count="exact").execute()
+        tasks_res = db.client.table("agent_tasks").select("id, status", count="exact").execute()
         total_tasks = tasks_res.count if hasattr(tasks_res, 'count') else len(tasks_res.data)
         completed_tasks = len([t for t in tasks_res.data if t.get("status") == "completed"])
         

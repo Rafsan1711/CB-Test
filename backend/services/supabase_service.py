@@ -60,8 +60,8 @@ class SupabaseService:
     async def delete_repo(self, repo_id: str) -> bool:
         # Delete related records first to avoid foreign key constraints
         self.client.table("activity_log").delete().eq("repo_id", repo_id).execute()
-        self.client.table("tasks").delete().eq("repo_id", repo_id).execute()
-        self.client.table("prs").delete().eq("repo_id", repo_id).execute()
+        self.client.table("agent_tasks").delete().eq("repo_id", repo_id).execute()
+        self.client.table("pull_requests").delete().eq("repo_id", repo_id).execute()
         self.client.table("issues").delete().eq("repo_id", repo_id).execute()
         
         # Finally delete the repo
@@ -112,7 +112,7 @@ class SupabaseService:
         res = self.client.table("agent_tasks").insert(data).execute()
         return res.data[0] if res.data else {}
 
-    async def update_agent_task(self, task_id: str, status: str, output_data: Optional[dict] = None, error_message: Optional[str] = None, model_used: Optional[str] = None) -> dict:
+    async def update_agent_task(self, task_id: str, status: str, output_data: Optional[dict] = None, error_message: Optional[str] = None, model_used: Optional[str] = None, retry_count: Optional[int] = None) -> dict:
         data = {"status": status}
         if output_data is not None:
             data["output_data"] = output_data
@@ -120,6 +120,8 @@ class SupabaseService:
             data["error_message"] = error_message
         if model_used is not None:
             data["model_used"] = model_used
+        if retry_count is not None:
+            data["retry_count"] = retry_count
             
         if status == "running":
             data["started_at"] = datetime.utcnow().isoformat()

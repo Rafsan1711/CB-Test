@@ -157,7 +157,7 @@ class AgentOrchestrator:
                 
                 try:
                     # Mark as running
-                    db.client.table("agent_tasks").update({"status": "running", "started_at": datetime.now(timezone.utc).isoformat()}).eq("id", item.task_id).execute()
+                    await db.update_agent_task(item.task_id, "running")
                     
                     await self._execute_with_retry(item)
                     
@@ -174,25 +174,18 @@ class AgentOrchestrator:
             try:
                 await self._route_task(item)
                 # If successful, update DB and break
-                db.client.table("agent_tasks").update({
-                    "status": "completed",
-                    "completed_at": datetime.now(timezone.utc).isoformat()
-                }).eq("id", item.task_id).execute()
+                await db.update_agent_task(item.task_id, "completed")
                 return
                 
             except Exception as e:
                 error_msg = str(e).lower()
                 
                 # Update retry count in DB
-                db.client.table("agent_tasks").update({"retry_count": attempt + 1}).eq("id", item.task_id).execute()
+                await db.update_agent_task(item.task_id, "running", retry_count=attempt + 1)
                 
                 if attempt == max_retries:
                     # Final failure
-                    db.client.table("agent_tasks").update({
-                        "status": "failed",
-                        "error_message": str(e),
-                        "completed_at": datetime.now(timezone.utc).isoformat()
-                    }).eq("id", item.task_id).execute()
+                    await db.update_agent_task(item.task_id, "failed", error_message=str(e))
                     
                     # Log to error_service
                     await error_service.log_error(
@@ -550,7 +543,7 @@ Please review the changes. The code has been generated based on existing reposit
         )
         
         # Update DB
-        db.client.table("repos").update({"current_version": new_version}).eq("id", item.repo_id).execute()
+        await db.update_repo(item.repo_id, {"current_version": new_version})
         await db.create_release(item.repo_id, new_version, bump_type, release_notes, release_url, new_version)
         
         await self._log(item.repo_id, "release_created", f"Created release {new_version}", item.task_id, asyncio.get_event_loop().time())
