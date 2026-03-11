@@ -56,10 +56,18 @@ async def update_settings(settings: SettingsUpdate, current_user: dict = Depends
     }
     
     # Update user in Supabase
-    res = db.client.table("users").update({
-        "settings": new_settings,
-        "updated_at": datetime.utcnow().isoformat()
-    }).eq("id", user["id"]).execute()
+    try:
+        res = db.client.table("users").update({
+            "settings": new_settings,
+            "updated_at": datetime.utcnow().isoformat()
+        }).eq("id", user["id"]).execute()
+    except Exception as e:
+        if "updated_at" in str(e):
+            res = db.client.table("users").update({
+                "settings": new_settings
+            }).eq("id", user["id"]).execute()
+        else:
+            raise e
     return res.data[0] if res.data else {}
 
 @router.post("/logout")

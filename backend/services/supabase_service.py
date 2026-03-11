@@ -29,10 +29,17 @@ class SupabaseService:
 
     async def update_user_github_token(self, user_id: str, token: str) -> dict:
         data = {
-            "github_access_token": token,
-            "updated_at": datetime.utcnow().isoformat()
+            "github_access_token": token
         }
-        res = self.client.table("users").update(data).eq("id", user_id).execute()
+        try:
+            # Try with updated_at first
+            update_data = {**data, "updated_at": datetime.utcnow().isoformat()}
+            res = self.client.table("users").update(update_data).eq("id", user_id).execute()
+        except Exception as e:
+            if "updated_at" in str(e):
+                res = self.client.table("users").update(data).eq("id", user_id).execute()
+            else:
+                raise e
         return res.data[0] if res.data else {}
 
     # --- Repos ---
@@ -58,8 +65,15 @@ class SupabaseService:
         return res.data[0] if res.data else None
 
     async def update_repo(self, repo_id: str, data: dict) -> dict:
-        data["updated_at"] = datetime.utcnow().isoformat()
-        res = self.client.table("repos").update(data).eq("id", repo_id).execute()
+        try:
+            # Try with updated_at first
+            update_data = {**data, "updated_at": datetime.utcnow().isoformat()}
+            res = self.client.table("repos").update(update_data).eq("id", repo_id).execute()
+        except Exception as e:
+            if "updated_at" in str(e):
+                res = self.client.table("repos").update(data).eq("id", repo_id).execute()
+            else:
+                raise e
         return res.data[0] if res.data else {}
 
     async def delete_repo(self, repo_id: str) -> bool:
@@ -87,8 +101,14 @@ class SupabaseService:
         return res.data
 
     async def update_issue(self, issue_id: str, data: dict) -> dict:
-        data["updated_at"] = datetime.utcnow().isoformat()
-        res = self.client.table("issues").update(data).eq("id", issue_id).execute()
+        try:
+            update_data = {**data, "updated_at": datetime.utcnow().isoformat()}
+            res = self.client.table("issues").update(update_data).eq("id", issue_id).execute()
+        except Exception as e:
+            if "updated_at" in str(e):
+                res = self.client.table("issues").update(data).eq("id", issue_id).execute()
+            else:
+                raise e
         return res.data[0] if res.data else {}
 
     # --- Pull Requests ---
@@ -102,8 +122,14 @@ class SupabaseService:
         return res.data
 
     async def update_pr(self, pr_id: str, data: dict) -> dict:
-        data["updated_at"] = datetime.utcnow().isoformat()
-        res = self.client.table("pull_requests").update(data).eq("id", pr_id).execute()
+        try:
+            update_data = {**data, "updated_at": datetime.utcnow().isoformat()}
+            res = self.client.table("pull_requests").update(update_data).eq("id", pr_id).execute()
+        except Exception as e:
+            if "updated_at" in str(e):
+                res = self.client.table("pull_requests").update(data).eq("id", pr_id).execute()
+            else:
+                raise e
         return res.data[0] if res.data else {}
 
     # --- Agent Tasks ---
@@ -133,8 +159,14 @@ class SupabaseService:
         elif status in ["completed", "failed"]:
             data["completed_at"] = datetime.utcnow().isoformat()
             
-        data["updated_at"] = datetime.utcnow().isoformat()
-        res = self.client.table("agent_tasks").update(data).eq("id", task_id).execute()
+        try:
+            update_data = {**data, "updated_at": datetime.utcnow().isoformat()}
+            res = self.client.table("agent_tasks").update(update_data).eq("id", task_id).execute()
+        except Exception as e:
+            if "updated_at" in str(e):
+                res = self.client.table("agent_tasks").update(data).eq("id", task_id).execute()
+            else:
+                raise e
         return res.data[0] if res.data else {}
 
     async def get_pending_tasks(self, repo_id: Optional[str] = None) -> List[dict]:

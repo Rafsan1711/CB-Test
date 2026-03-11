@@ -64,11 +64,20 @@ class RepoContextService:
                 }).eq("id", repo_id).execute()
             except Exception as e:
                 error_msg = str(e)
-                if "column" in error_msg and ("context_summary" in error_msg or "last_context_built_at" in error_msg):
+                if "column" in error_msg and ("context_summary" in error_msg or "last_context_built_at" in error_msg or "updated_at" in error_msg):
                     logger.warning(f"Database schema mismatch: {error_msg}. Using settings fallback.")
-                    await db.client.table("repos").update({
-                        "settings": new_settings
-                    }).eq("id", repo_id).execute()
+                    try:
+                        await db.client.table("repos").update({
+                            "settings": new_settings,
+                            "updated_at": now_iso
+                        }).eq("id", repo_id).execute()
+                    except Exception as e2:
+                        if "updated_at" in str(e2):
+                            await db.client.table("repos").update({
+                                "settings": new_settings
+                            }).eq("id", repo_id).execute()
+                        else:
+                            raise e2
                 else:
                     # Some other error, re-raise
                     raise e
