@@ -57,7 +57,7 @@ class RepoContextService:
             # Check if we can update specific columns by trying a small update first or just catch the error
             try:
                 # Attempt to update all columns
-                await db.client.table("repos").update({
+                db.client.table("repos").update({
                     "last_context_built_at": now_iso,
                     "context_summary": summary,
                     "settings": new_settings
@@ -67,13 +67,13 @@ class RepoContextService:
                 if "column" in error_msg and ("context_summary" in error_msg or "last_context_built_at" in error_msg or "updated_at" in error_msg):
                     logger.warning(f"Database schema mismatch: {error_msg}. Using settings fallback.")
                     try:
-                        await db.client.table("repos").update({
+                        db.client.table("repos").update({
                             "settings": new_settings,
                             "updated_at": now_iso
                         }).eq("id", repo_id).execute()
                     except Exception as e2:
                         if "updated_at" in str(e2):
-                            await db.client.table("repos").update({
+                            db.client.table("repos").update({
                                 "settings": new_settings
                             }).eq("id", repo_id).execute()
                         else:
