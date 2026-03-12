@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request, Header, HTTPException, BackgroundTasks
 from services.supabase_service import db
 from services.agent_orchestrator import orchestrator
 
-router = APIRouter(prefix="/webhook", tags=["webhook"])
+router = APIRouter()
 
 async def verify_signature(payload: bytes, sig_header: str, secret: str) -> bool:
     if not sig_header or not sig_header.startswith("sha256="):

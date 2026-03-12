@@ -19,29 +19,28 @@ body:
       label: Describe the bug
     validations:
       required: true
-  - type: input
-    id: contribot_label
+  - type: textarea
+    id: steps
     attributes:
-      label: ContriBot Label
-      description: Type "contribot-fix" to auto-assign ContriBot
+      label: Steps to reproduce
     validations:
-      required: false
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs Actual behavior
+    validations:
+      required: true
 """
         feature_request = """name: Feature Request
 description: Suggest an idea for this project
-labels: ["enhancement", "contribot-review"]
+labels: ["enhancement"]
 body:
   - type: textarea
     id: feature_description
     attributes:
       label: Feature description
-      description: "💡 Tip: Comment **yes** to ask ContriBot to implement this, or **no** to close."
-    validations:
-      required: true
-  - type: textarea
-    id: use_case
-    attributes:
-      label: Use case
+      description: "💡 After submitting, ContriBot will analyze this request. Reply **yes** to have ContriBot implement this, or **no** to close."
     validations:
       required: true
   - type: dropdown
@@ -84,36 +83,139 @@ body:
     validations:
       required: true
 """
-        pr_template = """## 📋 Summary
+        pr_template_content = """## Summary
 <!-- What does this PR do? -->
 
-## 🤖 ContriBot Verification
-<!-- If this PR was auto-generated or verified by ContriBot, paste the consensus summary here -->
+## Related Issue
+Closes #
 
-## 📝 Checklist
-- [ ] Code follows existing patterns
-- [ ] Tests pass
+## Type of Change
+- [ ] Bug fix
+- [ ] New feature  
+- [ ] Enhancement
+- [ ] Docs
+
+## Testing
+- [ ] Tested locally
+- [ ] All CI checks pass
+
+---
+_This PR will be automatically reviewed by ContriBot's 4-model verification system._
 """
         
+        ci_workflow = """name: ContriBot CI
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect and Run CI
+        run: |
+          if [ -f package.json ]; then
+            npm install && npm test
+          elif [ -f requirements.txt ]; then
+            pip install -r requirements.txt && pytest
+          else
+            echo "No supported build file found"
+          fi
+"""
+
+        code_quality_workflow = """name: Code Quality
+on:
+  pull_request:
+    branches: [ main, master ]
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for secrets
+        run: |
+          # Simple secret check placeholder
+          grep -rE "AI_KEY|SECRET|PASSWORD" . --exclude-dir=.git || true
+"""
+
+        auto_label_workflow = """name: Auto Label
+on:
+  issues:
+    types: [opened]
+  pull_request:
+    types: [opened]
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Label based on content
+        run: echo "Labeling logic here"
+"""
+
+        stale_workflow = """name: Stale Issues
+on:
+  schedule:
+    - cron: '0 0 * * *'
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          stale-issue-message: 'This issue is stale because it has been open 60 days with no activity.'
+          days-before-stale: 60
+          days-before-close: 14
+"""
+
         try:
             repo_info = await github_svc.get_repo(full_name)
             branch = repo_info.get("default_branch", "main")
             
-            files_to_create = [
+            files_to_process = [
                 (".github/ISSUE_TEMPLATE/bug_report.yml", bug_report, "chore: add bug report template"),
                 (".github/ISSUE_TEMPLATE/feature_request.yml", feature_request, "chore: add feature request template"),
                 (".github/ISSUE_TEMPLATE/contribot_task.yml", contribot_task, "chore: add contribot task template"),
-                (".github/pull_request_template.md", pr_template, "chore: add PR template"),
+                (".github/workflows/ci.yml", ci_workflow, "chore: add CI workflow"),
+                (".github/workflows/code-quality.yml", code_quality_workflow, "chore: add code quality workflow"),
+                (".github/workflows/auto-label.yml", auto_label_workflow, "chore: add auto label workflow"),
+                (".github/workflows/stale.yml", stale_workflow, "chore: add stale workflow"),
             ]
             
             results = []
-            for path, content, msg in files_to_create:
+            for path, content, msg in files_to_process:
                 try:
+                    exists = await github_svc.file_exists(full_name, path, branch)
+                    if exists:
+                        logger.info(f"Skipping {path} on {full_name} as it already exists.")
+                        results.append({"path": path, "status": "skipped", "reason": "already exists"})
+                        continue
+                        
                     await github_svc.create_or_update_file(full_name, path, content, msg, branch)
                     results.append({"path": path, "status": "success"})
                 except Exception as e:
-                    logger.error(f"Failed to create {path} on {full_name}: {e}")
+                    logger.error(f"Failed to process {path} on {full_name}: {e}")
                     results.append({"path": path, "status": "failed", "error": str(e)})
+            
+            # Special handling for PR template: append if exists
+            pr_path = ".github/pull_request_template.md"
+            try:
+                exists = await github_svc.file_exists(full_name, pr_path, branch)
+                if exists:
+                    current_content = await github_svc.get_file_content(full_name, pr_path)
+                    if "ContriBot's 4-model verification system" not in current_content:
+                        new_content = current_content + "\n\n---\n_This PR will be automatically reviewed by ContriBot's 4-model verification system._\n"
+                        await github_svc.create_or_update_file(full_name, pr_path, new_content, "chore: append ContriBot verification to PR template", branch)
+                        results.append({"path": pr_path, "status": "appended"})
+                    else:
+                        results.append({"path": pr_path, "status": "skipped", "reason": "already has verification line"})
+                else:
+                    await github_svc.create_or_update_file(full_name, pr_path, pr_template_content, "chore: add PR template", branch)
+                    results.append({"path": pr_path, "status": "success"})
+            except Exception as e:
+                logger.error(f"Failed to process PR template on {full_name}: {e}")
+                results.append({"path": pr_path, "status": "failed", "error": str(e)})
                     
             return {"status": "completed", "results": results}
         except Exception as e:

@@ -49,6 +49,9 @@ class GeminiService:
 
     def __init__(self):
         self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        # Separate client for reviews if a different key is provided
+        review_key = settings.GEMINI_API_KEY_REVIEW or settings.GEMINI_API_KEY
+        self.review_client = genai.Client(api_key=review_key)
 
     def _clean_json_response(self, text: str) -> str:
         """Removes markdown code blocks if the model returns them despite instructions."""
@@ -61,7 +64,8 @@ class GeminiService:
             text = text[:-3]
         return text.strip()
 
-    async def generate(self, prompt: str, model: str, system_prompt: str = None, json_mode: bool = False, temperature: float = 0.3) -> str:
+    async def generate(self, prompt: str, model: str, system_prompt: str = None, json_mode: bool = False, temperature: float = 0.3, client: genai.Client = None) -> str:
+        target_client = client or self.client
         config_args = {
             "temperature": temperature,
         }
@@ -77,7 +81,7 @@ class GeminiService:
 
         for attempt in range(3):
             try:
-                response = await self.client.aio.models.generate_content(
+                response = await target_client.aio.models.generate_content(
                     model=model,
                     contents=prompt,
                     config=config
@@ -148,13 +152,12 @@ Return ONLY valid JSON matching this schema:
 """
         models = [self.MODEL_PRO, self.MODEL_FLASH, self.MODEL_STABLE_PRO, self.MODEL_STABLE_FLASH]
         
-        # Run all models in parallel
-        tasks = [self.generate(prompt, m, system_prompt=SYSTEM_PROMPT_REVIEWER, json_mode=True) for m in models]
+        # Run all models in parallel using the review client
+        tasks = [self.generate(prompt, m, system_prompt=SYSTEM_PROMPT_REVIEWER, json_mode=True, client=self.review_client) for m in models]
         results_json = await asyncio.gather(*tasks, return_exceptions=True)
         
         parsed_results = []
         weighted_score = 0
-        max_weight = 5 # PRO=2, others=1 => 2 + 1 + 1 + 1 = 5
         
         for i, res in enumerate(results_json):
             model_name = models[i]
@@ -192,11 +195,13 @@ Return ONLY valid JSON matching this schema:
                     ))
         
         consensus_score = sum(1 for r in parsed_results if r.approved)
-        safe_to_merge = weighted_score >= 4
+        # Consensus: 3/4 models approved OR weighted score >= 3
+        # Spec says: consensus_score = count of models that approved (out of 4), safe_to_merge = consensus_score >= 3
+        safe_to_merge = consensus_score >= 3
         
         # Generate overall summary using the lightest model
         summary_prompt = f"Summarize these PR verification results from multiple AI models into a single concise paragraph:\n{json.dumps([r.model_dump() for r in parsed_results])}"
-        summary = await self.generate(summary_prompt, self.MODEL_FLASH_LITE)
+        summary = await self.generate(summary_prompt, self.MODEL_FLASH_LITE, client=self.review_client)
         
         return ConsensusSummary(
             results=parsed_results,
@@ -232,49 +237,6 @@ Analyze this issue. Return ONLY valid JSON matching this schema:
 """
         res = await self.generate(prompt, self.MODEL_FLASH, system_prompt=SYSTEM_PROMPT_ANALYST, json_mode=True)
         return json.loads(res)
-
-    async def call_external_api(self, api_description: str, purpose: str) -> dict:
-        """Allow ContriBot to call external APIs for context."""
-        prompt = f"""
-You need to call an external API for the following purpose: {purpose}
-API Description/Context: {api_description}
-
-Determine the exact GET URL to call. Supported registries: npm, PyPI, GitHub API (public repos), or REST APIs with no auth.
-Return ONLY valid JSON matching this schema:
-{{
-  "url": "https://...",
-  "reason": "..."
-}}
-"""
-        try:
-            res = await self.generate(prompt, self.MODEL_FLASH_LITE, json_mode=True)
-            data = json.loads(res)
-            url = data.get("url")
-            
-            if not url or not url.startswith("http"):
-                return {"api_called": None, "response_summary": "Invalid URL generated.", "useful_data": None}
-                
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(url)
-                response.raise_for_status()
-                api_data = response.json()
-                
-            # Summarize the response using Gemini
-            summary_prompt = f"Summarize this API response for the purpose of {purpose}. Extract only the useful data.\n\nResponse:\n{json.dumps(api_data)[:5000]}"
-            summary = await self.generate(summary_prompt, self.MODEL_FLASH_LITE)
-            
-            return {
-                "api_called": url,
-                "response_summary": summary,
-                "useful_data": api_data
-            }
-        except Exception as e:
-            logger.error(f"Failed to call external API: {e}")
-            return {
-                "api_called": url if 'url' in locals() else None,
-                "response_summary": f"Failed to call API: {str(e)}",
-                "useful_data": None
-            }
 
     async def determine_version_bump(self, pr_titles: list[str], commit_messages: list[str], current_version: str) -> dict:
         system_prompt = """You are an expert release manager. Determine the next semantic version based on the changes.

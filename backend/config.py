@@ -4,6 +4,7 @@ from typing import List
 
 class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
+    GEMINI_API_KEY_REVIEW: str = ""
     SUPABASE_URL: str = ""
     SUPABASE_SERVICE_KEY: str = ""
     GITHUB_TOKEN: str = ""

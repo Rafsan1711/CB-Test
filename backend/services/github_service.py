@@ -45,6 +45,18 @@ class GitHubService:
             return contents.decoded_content.decode("utf-8")
         return await self._run_async(_get_content)
 
+    async def file_exists(self, full_name: str, path: str, branch: str = None) -> bool:
+        def _check_exists():
+            repo = self.client.get_repo(full_name)
+            try:
+                repo.get_contents(path, ref=branch) if branch else repo.get_contents(path)
+                return True
+            except GithubException as e:
+                if e.status == 404:
+                    return False
+                raise e
+        return await self._run_async(_check_exists)
+
     async def create_or_update_file(self, full_name: str, path: str, content: str, message: str, branch: str) -> dict:
         def _commit_file():
             repo = self.client.get_repo(full_name)

@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -8,7 +9,40 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="ContriBot API", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting up ContriBot API...")
+    try:
+        from services.supabase_service import db
+        logger.info("Supabase connection initialized.")
+    except Exception as e:
+        logger.error(f"Failed to connect to Supabase: {e}")
+
+    try:
+        from services.agent_orchestrator import orchestrator
+        orchestrator.start()
+        logger.info("AgentOrchestrator started.")
+    except Exception as e:
+        logger.error(f"Failed to start AgentOrchestrator: {e}")
+
+    if settings.GITHUB_TOKEN:
+        logger.info("GitHub token found.")
+    else:
+        logger.warning("GitHub token not configured.")
+        
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down ContriBot API...")
+    try:
+        from services.agent_orchestrator import orchestrator
+        orchestrator.stop()
+        logger.info("AgentOrchestrator stopped.")
+    except Exception as e:
+        logger.error(f"Failed to stop AgentOrchestrator: {e}")
+
+app = FastAPI(title="ContriBot API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,20 +67,6 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "version": "1.0.0"}
-
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Starting up ContriBot API...")
-    try:
-        from services.supabase_service import db
-        logger.info("Supabase connection initialized.")
-    except Exception as e:
-        logger.error(f"Failed to connect to Supabase: {e}")
-
-    if settings.GITHUB_TOKEN:
-        logger.info("GitHub token found.")
-    else:
-        logger.warning("GitHub token not configured.")
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):

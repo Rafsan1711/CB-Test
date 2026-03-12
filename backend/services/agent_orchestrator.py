@@ -225,12 +225,26 @@ class AgentOrchestrator:
     async def _route_task(self, item: QueueItem):
         if item.task_type == "analyze_issue":
             await self._handle_analyze_issue(item)
-        elif item.task_type == "write_code" or item.task_type == "fix_bug" or item.task_type == "implement_feature":
+        elif item.task_type in ["write_code", "fix_bug", "implement_feature"]:
             await self._handle_implement_issue(item)
         elif item.task_type == "verify_pr":
             await self._handle_verify_pr(item)
+        elif item.task_type == "revise_code":
+            await self._handle_revise_code(item)
         elif item.task_type == "process_pr_merge":
             await self._handle_pr_merged(item)
+        elif item.task_type == "repo_ingestion":
+            await self._handle_repo_ingestion(item)
+        elif item.task_type == "install_templates":
+            await self._handle_install_templates(item)
+        elif item.task_type == "install_ci":
+            await self._handle_install_ci(item)
+        elif item.task_type == "install_labels":
+            await self._handle_install_labels(item)
+        elif item.task_type == "sync_issues":
+            await self._handle_sync_issues(item)
+        elif item.task_type == "post_comment":
+            await self._handle_post_comment(item)
         elif item.task_type == "release":
             await self._handle_release(item)
         elif item.task_type == "build_context":
@@ -242,16 +256,72 @@ class AgentOrchestrator:
     # Task Handlers
     # =========================================================================
 
-    async def _handle_analyze_issue(self, item: QueueItem):
-        issue_id = item.input_data.get("issue_id")
-        github_issue_number = item.input_data.get("github_issue_number")
+    async def _handle_repo_ingestion(self, item: QueueItem):
+        repo = await db.get_repo_by_id(item.repo_id)
+        full_name = repo["github_full_name"]
+        await repo_context_service.get_context(item.repo_id, full_name, force_rebuild=True)
+        await self._log(item.repo_id, "repo_ingestion", "Repository ingestion complete", item.task_id, asyncio.get_event_loop().time())
+
+    async def _handle_install_templates(self, item: QueueItem):
+        repo = await db.get_repo_by_id(item.repo_id)
+        full_name = repo["github_full_name"]
+        from services.template_service import template_svc
+        res = await template_svc.install_templates_on_repo(full_name)
+        await self._log(item.repo_id, "install_templates", f"Templates installation: {res['status']}", item.task_id, asyncio.get_event_loop().time())
+
+    async def _handle_install_ci(self, item: QueueItem):
+        # This is now handled within install_templates_on_repo in template_svc
+        await self._log(item.repo_id, "install_ci", "CI workflows installed via template service", item.task_id, asyncio.get_event_loop().time())
+
+    async def _handle_install_labels(self, item: QueueItem):
+        repo = await db.get_repo_by_id(item.repo_id)
+        full_name = repo["github_full_name"]
+        labels = [
+            {"name": "bug", "color": "d73a4a", "description": "Something isn't working"},
+            {"name": "enhancement", "color": "a2eeef", "description": "New feature or request"},
+            {"name": "contribot-task", "color": "7057ff", "description": "Direct task for ContriBot"},
+            {"name": "priority: critical", "color": "b60205", "description": "Highest priority"},
+            {"name": "priority: high", "color": "d93f0b", "description": "High priority"},
+            {"name": "priority: medium", "color": "fbca04", "description": "Medium priority"},
+            {"name": "priority: low", "color": "0e8a16", "description": "Low priority"},
+        ]
         
+        gh_repo = github_svc.client.get_repo(full_name)
+        for label in labels:
+            try:
+                await github_svc._run_async(gh_repo.create_label, name=label["name"], color=label["color"], description=label["description"])
+            except Exception:
+                # Label might already exist
+                pass
+        await self._log(item.repo_id, "install_labels", "Standard labels installed", item.task_id, asyncio.get_event_loop().time())
+
+    async def _handle_sync_issues(self, item: QueueItem):
+        repo = await db.get_repo_by_id(item.repo_id)
+        full_name = repo["github_full_name"]
+        github_issues = await github_svc.list_open_issues(full_name)
+        
+        existing_issues = await db.get_issues_by_repo(item.repo_id)
+        existing_numbers = {i["github_issue_number"] for i in existing_issues if i.get("github_issue_number")}
+        
+        count = 0
+        for issue in github_issues:
+            if issue["number"] not in existing_numbers:
+                await db.create_issue(item.repo_id, {
+                    "github_issue_number": issue["number"],
+                    "title": issue["title"],
+                    "body": issue["body"],
+                    "status": "open"
+                })
+                count += 1
+        
+        await self._log(item.repo_id, "sync_issues", f"Synced {count} new issues", item.task_id, asyncio.get_event_loop().time())
+
+    async def _handle_analyze_issue(self, item: QueueItem):
+        github_issue_number = item.input_data.get("github_issue_number")
         repo = await db.get_repo_by_id(item.repo_id)
         full_name = repo["github_full_name"]
         
         issue_data = await github_svc.get_issue(full_name, github_issue_number)
-        
-        # Build focused context based on issue
         focused_context = await repo_context_service.build_focused_context(full_name, issue_data)
         
         analysis = await gemini_svc.analyze_issue(
@@ -260,73 +330,68 @@ class AgentOrchestrator:
             repo_context=focused_context
         )
         
-        # Update issue in DB
         issue_type = analysis.get("type", "feature").lower()
         requires_approval = analysis.get("requires_approval", False)
         
-        if not issue_id:
-            # Create if not exists
+        # Update or create issue in DB
+        existing = await db.get_issues_by_repo(item.repo_id)
+        db_issue = next((i for i in existing if i.get("github_issue_number") == github_issue_number), None)
+        
+        if not db_issue:
             db_issue = await db.create_issue(item.repo_id, {
                 "github_issue_number": github_issue_number,
                 "title": issue_data.get("title", ""),
                 "body": issue_data.get("body", ""),
                 "issue_type": issue_type,
                 "ai_analysis": analysis,
-                "labels": analysis.get("labels", [])
+                "status": "open"
             })
-            issue_id = db_issue["id"]
         else:
-            await db.update_issue(issue_id, {
+            db_issue = await db.update_issue(db_issue["id"], {
                 "issue_type": issue_type,
-                "ai_analysis": analysis,
-                "labels": analysis.get("labels", [])
+                "ai_analysis": analysis
             })
             
-        # Post Webhook Comment Intelligence
+        # Post Analysis Comment
         if issue_type == "bug" or not requires_approval:
-            comment = f"""## 🤖 ContriBot Analysis
+            comment = f"""## 🤖 ContriBot — Bug Analysis
 
-**Type:** 🐛 Bug  
-**Priority:** 🔴 High  
-**Estimated Fix Time:** ~1-2 hours
+**Classification:** 🐛 Bug  
+**Priority:** 🔴 {analysis.get('priority', 'High').capitalize()}  
+**Estimated Fix:** ~30-60 minutes  
 
-### 🔍 Root Cause Analysis
-{analysis.get('reasoning', 'Based on the codebase context, this appears to be a bug requiring immediate attention.')}
+### 🔍 Likely Root Cause
+{analysis.get('analysis_summary', 'Root cause analysis in progress...')}
 
 ### 🛠️ Fix Plan
-ContriBot will analyze the affected files and generate a patch.
+{chr(10).join([f"{i+1}. {hint}" for i, hint in enumerate(analysis.get('implementation_hints', []))])}
 
----
-ContriBot is now implementing the fix automatically..."""
+ContriBot is now implementing this fix automatically..."""
             
             await github_svc.add_issue_comment(full_name, github_issue_number, comment)
-            await db.update_issue(issue_id, {"status": "approved"})
-            
-            # Enqueue implementation
-            await self.enqueue_task(item.repo_id, "fix_bug", {"issue_id": issue_id, "github_issue_number": github_issue_number}, TaskPriority.HIGH)
-            
+            await db.update_issue(db_issue["id"], {"status": "approved"})
+            await self.enqueue_task(item.repo_id, "write_code", {"issue_id": db_issue["id"], "github_issue_number": github_issue_number}, TaskPriority.HIGH)
         else:
-            # Feature request
-            components = ", ".join([f"`{c}`" for c in analysis.get("affected_files", [])[:3]]) or "`general`"
-            comment = f"""## 🤖 ContriBot Analysis
+            comment = f"""## 🤖 ContriBot — Issue Analysis
 
-**Type:** ✨ Feature Request  
-**Priority:** 🟡 Medium  
-**Estimated Complexity:** Moderate (~4-6 hours)  
-**Affected Components:** {components}
+**Classification:** ✨ {issue_type.capitalize()}  
+**Priority:** 🟡 {analysis.get('priority', 'Medium').capitalize()}  
+**Estimated Complexity:** {analysis.get('estimated_complexity', 'Moderate').capitalize()}  
+**Estimated Time:** ~{analysis.get('estimated_time_hours', 4)} hours  
+**Affected Areas:** {", ".join([f"`{c}`" for c in analysis.get('affected_components', [])])}
 
-### 📋 Implementation Plan
-{analysis.get('reasoning', 'ContriBot will implement the requested feature based on the repository patterns.')}
+### 📋 What ContriBot Will Do
+{chr(10).join([f"{i+1}. {hint}" for i, hint in enumerate(analysis.get('implementation_hints', []))])}
 
-### ❓ Questions for Owner
-- Are there any specific design constraints?
-- Should this be hidden behind a feature flag?
+### ⚠️ Things to Consider
+{chr(10).join([f"- {q}" for q in analysis.get('questions_for_owner', [])])}
 
 ---
-Reply **`yes`** to have ContriBot implement this, or **`no`** to close the issue."""
+Reply **`yes`** to have ContriBot implement this.  
+Reply **`no`** to close this issue."""
             
             await github_svc.add_issue_comment(full_name, github_issue_number, comment)
-            await db.update_issue(issue_id, {"status": "pending_approval"})
+            await db.update_issue(db_issue["id"], {"status": "pending_approval"})
 
     async def _handle_implement_issue(self, item: QueueItem):
         issue_id = item.input_data.get("issue_id")
@@ -334,68 +399,67 @@ Reply **`yes`** to have ContriBot implement this, or **`no`** to close the issue
         
         repo = await db.get_repo_by_id(item.repo_id)
         full_name = repo["github_full_name"]
-        
-        # Get issue details
         issue_data = await github_svc.get_issue(full_name, github_issue_number)
         
-        # Build context
-        context = await repo_context_service.get_context(item.repo_id, full_name)
+        # Build focused context
+        context = await repo_context_service.build_focused_context(full_name, issue_data)
         
         # Generate code
-        plan = await gemini_svc.generate_code(
-            issue_title=issue_data.get("title", ""),
-            issue_body=issue_data.get("body", ""),
-            repo_context=context
-        )
+        plan = await gemini_svc.write_code_for_issue(context, issue_data)
         
         # Create branch
-        branch_name = f"contribot/issue-{github_issue_number}-{issue_data.get('title', 'fix').lower().replace(' ', '-')[:20]}"
+        branch_name = plan.get("branch_name", f"contribot/issue-{github_issue_number}").replace("{{number}}", str(github_issue_number))
         await github_svc.create_branch(full_name, branch_name)
         
         # Apply changes
-        files_changed = 0
-        for file_change in plan.get("files", []):
-            await github_svc.create_or_update_file(
-                full_name=full_name,
-                path=file_change["path"],
-                content=file_change["content"],
-                message=f"Update {file_change['path']}",
-                branch=branch_name
-            )
-            files_changed += 1
-            
+        for f in plan.get("files_to_create", []):
+            await github_svc.create_or_update_file(full_name, f["path"], f["content"], f"feat: create {f['path']}", branch_name)
+        for f in plan.get("files_to_modify", []):
+            await github_svc.create_or_update_file(full_name, f["path"], f["modified_content"], f"fix: update {f['path']}", branch_name)
+        for path in plan.get("files_to_delete", []):
+            # PyGithub delete_file requires sha
+            try:
+                repo_obj = github_svc.client.get_repo(full_name)
+                contents = repo_obj.get_contents(path, ref=branch_name)
+                repo_obj.delete_file(path, f"chore: delete {path}", contents.sha, branch=branch_name)
+            except Exception:
+                pass
+                
         # Create PR
-        pr_title = f"Fix #{github_issue_number}: {issue_data.get('title')}"
-        pr_body = f"Automated fix for #{github_issue_number} generated by ContriBot."
-        pr_number = await github_svc.create_pull_request(full_name, pr_title, pr_body, branch_name)
+        pr_number = await github_svc.create_pull_request(
+            full_name, 
+            plan.get("pr_title", f"Fix #{github_issue_number}"), 
+            plan.get("pr_body", f"Resolves #{github_issue_number}"), 
+            branch_name
+        )
         
         # Save PR to DB
         db_pr = await db.create_pr(item.repo_id, {
             "issue_id": issue_id,
             "github_pr_number": pr_number,
-            "title": pr_title,
+            "title": plan.get("pr_title"),
             "branch_name": branch_name,
-            "status": "open",
-            "verification_status": "pending"
+            "status": "open"
         })
         
-        # Post Post-Implementation PR Comment
-        files_list = "\n".join([f"- `{f['path']}` — Updated" for f in plan.get("files", [])])
-        comment = f"""## 🤖 ContriBot Implementation Complete
-
-**Branch:** `{branch_name}`  
-**Files Changed:** {files_changed} modified/created  
-
-### 📝 Changes Made
-{files_list}
-
-### 🧪 Testing Notes
-Please review the changes. The code has been generated based on existing repository patterns.
-
-### 🔍 Verification Running...
-4 AI models are now reviewing this PR. Results will be posted shortly."""
+        # Post PR Creation Comment
+        files_table = "| File | Action |\n|------|--------|\n"
+        for f in plan.get("files_to_create", []): files_table += f"| `{f['path']}` | ✅ Created |\n"
+        for f in plan.get("files_to_modify", []): files_table += f"| `{f['path']}` | ✏️ Modified |\n"
+        for path in plan.get("files_to_delete", []): files_table += f"| `{path}` | 🗑️ Deleted |\n"
         
-        await github_svc.add_issue_comment(full_name, pr_number, comment) # PRs are issues in GitHub API for comments
+        comment = f"""## 🤖 ContriBot — Implementation Complete
+
+**Resolves:** #{github_issue_number}  
+**Branch:** `{branch_name}`  
+
+### 📁 Changes Made
+{files_table}
+
+### 🔍 Running Multi-Model Verification...
+_(4 AI models are reviewing this PR. Results below.)_"""
+        
+        await github_svc.add_issue_comment(full_name, pr_number, comment)
         await db.update_issue(issue_id, {"status": "in_progress"})
         
         # Enqueue verification
@@ -408,39 +472,99 @@ Please review the changes. The code has been generated based on existing reposit
         repo = await db.get_repo_by_id(item.repo_id)
         full_name = repo["github_full_name"]
         
-        # Get PR diff
-        diff = await github_svc.get_pr_diff(full_name, github_pr_number)
+        if not github_pr_number and pr_id:
+            # Fetch from DB if missing
+            prs = await db.get_prs_by_repo(item.repo_id)
+            db_pr = next((p for p in prs if p["id"] == pr_id), None)
+            if db_pr:
+                github_pr_number = db_pr.get("github_pr_number")
         
-        # Build context
+        if not github_pr_number:
+            raise ValueError(f"Missing github_pr_number for task {item.task_id}")
+            
+        pr_data = await github_svc.get_pull_request(full_name, github_pr_number)
+        diff = await github_svc.get_pr_diff(full_name, github_pr_number)
         context = await repo_context_service.get_context(item.repo_id, full_name)
         
-        # Verify
-        verification = await gemini_svc.verify_pr(diff, context)
+        consensus = await gemini_svc.verify_pr_multimodel(diff, pr_data["title"], pr_data["body"], context)
         
         # Update DB
-        score = verification.get("score", 0)
-        status = "approved" if score >= 80 else "changes_requested"
+        if pr_id:
+            await db.update_pr(pr_id, {
+                "verification_status": "approved" if consensus.safe_to_merge else "changes_requested",
+                "verification_results": [r.model_dump() for r in consensus.results],
+                "consensus_score": consensus.consensus_score
+            })
+            
+        # Post Report Comment
+        report_table = "| Model | Verdict | Score | Key Findings |\n|-------|---------|-------|--------------|\n"
+        for r in consensus.results:
+            verdict = "✅ Approved" if r.approved else "❌ Rejected"
+            report_table += f"| {r.model_name} | {verdict} | {r.score}/10 | {r.reasoning[:50]}... |\n"
+            
+        status_header = "## ✅ SAFE TO MERGE" if consensus.safe_to_merge else "## ⚠️ NEEDS WORK"
+        status_msg = "> This PR has been independently verified by 4 AI models. Review and merge when ready." if consensus.safe_to_merge else "> Verification failed. ContriBot will attempt to revise the implementation."
         
-        await db.update_pr(pr_id, {
-            "verification_status": status,
-            "verification_results": verification,
-            "weighted_score": score
-        })
-        
-        # Post review comment
-        review_body = f"""## 🤖 ContriBot Verification Results
+        comment = f"""## 🔍 ContriBot — Verification Report
 
-**Score:** {score}/100
-**Status:** {'✅ Approved' if status == 'approved' else '❌ Changes Requested'}
+{report_table}
 
-### 🔍 Feedback
-{verification.get('feedback', 'No specific feedback provided.')}
+### 🎯 Consensus: {consensus.consensus_score}/4 Models Approved
 
-### ⚠️ Potential Issues
-{verification.get('potential_issues', 'None detected.')}
+---
+{status_header}
+{status_msg}
 """
-        event = "APPROVE" if status == "approved" else "REQUEST_CHANGES"
-        await github_svc.add_pr_review(full_name, github_pr_number, review_body, event)
+        await github_svc.add_issue_comment(full_name, github_pr_number, comment)
+        
+        if not consensus.safe_to_merge:
+            # Trigger revision loop
+            await self.enqueue_task(item.repo_id, "revise_code", {"pr_id": pr_id, "github_pr_number": github_pr_number, "consensus": consensus.model_dump()}, TaskPriority.HIGH)
+
+    async def _handle_revise_code(self, item: QueueItem):
+        pr_id = item.input_data.get("pr_id")
+        github_pr_number = item.input_data.get("github_pr_number")
+        consensus_data = item.input_data.get("consensus")
+        
+        repo = await db.get_repo_by_id(item.repo_id)
+        full_name = repo["github_full_name"]
+        
+        # Get PR and diff
+        pr_data = await github_svc.get_pull_request(full_name, github_pr_number)
+        diff = await github_svc.get_pr_diff(full_name, github_pr_number)
+        context = await repo_context_service.get_context(item.repo_id, full_name)
+        
+        # Gemini 3.1 Pro revises the code
+        prompt = f"""
+Your previous implementation for PR #{github_pr_number} failed verification.
+Issues found by reviewers:
+{json.dumps(consensus_data['results'])}
+
+Original PR Diff:
+{diff}
+
+Repo Context:
+{json.dumps(context)}
+
+Please REVISE the implementation to address all issues.
+Return ONLY valid JSON matching the write_code schema.
+"""
+        res = await gemini_svc.generate(prompt, gemini_svc.MODEL_PRO, system_prompt=gemini_svc.SYSTEM_PROMPT_ENGINEER, json_mode=True)
+        revision = json.loads(res)
+        
+        branch_name = pr_data["head"]["ref"]
+        
+        # Apply revised changes to the SAME branch
+        for f in revision.get("files_to_create", []):
+            await github_svc.create_or_update_file(full_name, f["path"], f["content"], f"fix: revised {f['path']}", branch_name)
+        for f in revision.get("files_to_modify", []):
+            await github_svc.create_or_update_file(full_name, f["path"], f["modified_content"], f"fix: revised {f['path']}", branch_name)
+            
+        comment = "🔁 ContriBot has revised the implementation based on verification feedback. Re-running verification..."
+        await github_svc.add_issue_comment(full_name, github_pr_number, comment)
+        
+        # Re-enqueue verification
+        await self.enqueue_task(item.repo_id, "verify_pr", {"pr_id": pr_id, "github_pr_number": github_pr_number}, TaskPriority.HIGH)
 
     async def _handle_pr_merged(self, item: QueueItem):
         github_pr_number = item.input_data.get("github_pr_number")
