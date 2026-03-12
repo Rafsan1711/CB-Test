@@ -24,6 +24,22 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           cd backend
+
+          # README.md তৈরি করো HF Space config সহ
+          cat > README.md << 'EOF'
+          ---
+          title: ContriBot
+          emoji: 🤖
+          colorFrom: blue
+          colorTo: purple
+          sdk: docker
+          app_file: main.py
+          pinned: false
+          ---
+
+          ContriBot Backend API
+          EOF
+
           git init -b main
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
