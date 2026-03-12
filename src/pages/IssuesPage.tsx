@@ -166,8 +166,8 @@ export const IssuesPage: React.FC<IssuesPageProps> = ({ repoId }) => {
                       <span>Opened {formatDistanceToNow(new Date(issue.created_at), { addSuffix: true })}</span>
                       {issue.labels?.length > 0 && (
                         <div className="flex gap-2">
-                          {issue.labels.map(label => (
-                            <span key={label} className="flex items-center gap-1">
+                          {issue.labels.map((label, idx) => (
+                            <span key={`${label}-${idx}`} className="flex items-center gap-1">
                               <Tag className="w-3 h-3" /> {label}
                             </span>
                           ))}

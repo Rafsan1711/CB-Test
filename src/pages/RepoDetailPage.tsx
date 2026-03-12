@@ -290,8 +290,8 @@ export const RepoDetailPage: React.FC = () => {
                     <div>
                       <p className="text-xs text-gray-500 mb-1">Tech Stack</p>
                       <div className="flex flex-wrap gap-2">
-                        {context.tech_stack.map((tech: string) => (
-                          <span key={tech} className="px-2 py-1 bg-gray-800 rounded text-xs text-gray-300">{tech}</span>
+                        {context.tech_stack.map((tech: string, idx: number) => (
+                          <span key={`${tech}-${idx}`} className="px-2 py-1 bg-gray-800 rounded text-xs text-gray-300">{tech}</span>
                         ))}
                       </div>
                     </div>

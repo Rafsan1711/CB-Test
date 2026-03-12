@@ -66,8 +66,8 @@ export const IssueApprovalCard: React.FC<IssueApprovalCardProps> = ({ issue, onR
             <div>
               <p className="text-xs text-gray-500 mb-1">Labels</p>
               <div className="flex gap-1 flex-wrap">
-                {(analysis.labels || issue.labels || []).slice(0, 2).map((l: string) => (
-                  <span key={l} className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded">{l}</span>
+                {(analysis.labels || issue.labels || []).slice(0, 2).map((l: string, idx: number) => (
+                  <span key={`${l}-${idx}`} className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded">{l}</span>
                 ))}
               </div>
             </div>
