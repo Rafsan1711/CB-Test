@@ -6,12 +6,12 @@ on:
       - "backend/**"
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   sync-to-hf-space:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # Node.js 24 fix
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -19,34 +19,17 @@ jobs:
           fetch-depth: 0
           lfs: true
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install huggingface_hub
-        run: pip install huggingface_hub
-
-      - name: Upload backend/ to HF Space
+      - name: Push backend/ to HF Space via git
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          python - <<'PYEOF'
-          import os
-          from huggingface_hub import HfApi
-
-          api = HfApi(token=os.environ["HF_TOKEN"])
-          repo_id = "Rafs-an09002/ContriBot"
-          local_dir = "backend"
-
-          print(f"Uploading {local_dir}/ to {repo_id} ...")
-          api.upload_folder(
-              folder_path=local_dir,
-              repo_id=repo_id,
-              repo_type="space",
-              path_in_repo=".",        # ← root এ upload হবে, backend/ subfolder এ না
-              commit_message="sync: backend from GitHub Actions",
-              ignore_patterns=["__pycache__", "*.pyc", ".env", ".env.*"],
-          )
-          print("Done!")
-          PYEOF
+          # backend/ ফোল্ডার থেকে একটা temp git repo বানাও
+          cd backend
+          git init
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git add .
+          git commit -m "sync: backend from GitHub Actions $(date +'%Y-%m-%d %H:%M:%S')"
+          
+          # HuggingFace Space এ force push করো
+          git push https://Rafs-an09002:$HF_TOKEN@huggingface.co/spaces/Rafs-an09002/ContriBot main --force
