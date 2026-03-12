@@ -23,13 +23,10 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          # backend/ ফোল্ডার থেকে একটা temp git repo বানাও
           cd backend
-          git init
+          git init -b main
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
           git add .
           git commit -m "sync: backend from GitHub Actions $(date +'%Y-%m-%d %H:%M:%S')"
-          
-          # HuggingFace Space এ force push করো
           git push https://Rafs-an09002:$HF_TOKEN@huggingface.co/spaces/Rafs-an09002/ContriBot main --force
