@@ -457,7 +457,7 @@ Reply **`no`** to close this issue."""
 {files_table}
 
 ### 🔍 Running Multi-Model Verification...
-_(4 AI models are reviewing this PR. Results below.)_"""
+_(2 AI models are reviewing this PR. Results below.)_"""
         
         await github_svc.add_issue_comment(full_name, pr_number, comment)
         await db.update_issue(issue_id, {"status": "in_progress"})
@@ -503,13 +503,13 @@ _(4 AI models are reviewing this PR. Results below.)_"""
             report_table += f"| {r.model_name} | {verdict} | {r.score}/10 | {r.reasoning[:50]}... |\n"
             
         status_header = "## ✅ SAFE TO MERGE" if consensus.safe_to_merge else "## ⚠️ NEEDS WORK"
-        status_msg = "> This PR has been independently verified by 4 AI models. Review and merge when ready." if consensus.safe_to_merge else "> Verification failed. ContriBot will attempt to revise the implementation."
+        status_msg = "> This PR has been independently verified by 2 AI models. Review and merge when ready." if consensus.safe_to_merge else "> Verification failed. ContriBot will attempt to revise the implementation."
         
         comment = f"""## 🔍 ContriBot — Verification Report
 
 {report_table}
 
-### 🎯 Consensus: {consensus.consensus_score}/4 Models Approved
+### 🎯 Consensus: {consensus.consensus_score}/2 Models Approved
 
 ---
 {status_header}

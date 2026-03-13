@@ -18,7 +18,7 @@ These variables must be set in your backend environment (e.g., HuggingFace Space
 ## Repo-Level Settings
 These settings are configured via the ContriBot UI for each repository.
 - **Auto-Approve Bugs**: Automatically implement issues labeled as bugs.
-- **Strict Verification**: Require a consensus score of 4/4 (instead of 3/4) for PRs to be marked safe.
+- **Strict Verification**: Require a consensus score of 2/2 (instead of 1/2) for PRs to be marked safe.
 - **Branch Prefix**: Customize the branch prefix (default: `contribot/`).
 
 ## Webhook Configuration

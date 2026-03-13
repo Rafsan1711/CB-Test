@@ -124,8 +124,8 @@ export const PRsPage: React.FC<PRsPageProps> = ({ repoId }) => {
                     <div className="flex flex-col items-end gap-1">
                       <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">Consensus</span>
                       <div className="flex items-center gap-1.5">
-                        <span className={`font-mono font-bold ${pr.consensus_score >= 3 ? 'text-green-400' : 'text-orange-400'}`}>
-                          {pr.consensus_score}/4
+                        <span className={`font-mono font-bold ${pr.consensus_score >= 2 ? 'text-green-400' : 'text-orange-400'}`}>
+                          {pr.consensus_score}/2
                         </span>
                         <span className="text-gray-500 text-sm">Approved</span>
                       </div>
@@ -161,9 +161,9 @@ export const PRsPage: React.FC<PRsPageProps> = ({ repoId }) => {
                   {pr.verification_status === 'completed' && pr.verification_results ? (
                     <>
                       <ConsensusBanner 
-                        safeToMerge={pr.consensus_score >= 3}
+                        safeToMerge={pr.consensus_score >= 2}
                         score={pr.consensus_score}
-                        totalModels={4}
+                        totalModels={2}
                         issues={pr.verification_results.critical_issues || []}
                         githubPrUrl={`https://github.com/placeholder/pull/${pr.github_pr_number}`} // Replace with actual URL if available
                       />

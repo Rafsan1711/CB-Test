@@ -100,7 +100,7 @@ Closes #
 - [ ] All CI checks pass
 
 ---
-_This PR will be automatically reviewed by ContriBot's 4-model verification system._
+_This PR will be automatically reviewed by ContriBot's 2-model verification system._
 """
         
         ci_workflow = """name: ContriBot CI
@@ -204,8 +204,8 @@ jobs:
                 exists = await github_svc.file_exists(full_name, pr_path, branch)
                 if exists:
                     current_content = await github_svc.get_file_content(full_name, pr_path)
-                    if "ContriBot's 4-model verification system" not in current_content:
-                        new_content = current_content + "\n\n---\n_This PR will be automatically reviewed by ContriBot's 4-model verification system._\n"
+                    if "ContriBot's 2-model verification system" not in current_content:
+                        new_content = current_content + "\n\n---\n_This PR will be automatically reviewed by ContriBot's 2-model verification system._\n"
                         await github_svc.create_or_update_file(full_name, pr_path, new_content, "chore: append ContriBot verification to PR template", branch)
                         results.append({"path": pr_path, "status": "appended"})
                     else:

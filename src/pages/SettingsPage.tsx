@@ -24,7 +24,7 @@ export const SettingsPage: React.FC = () => {
     requireCiPass: true
   });
   const [aiSettings, setAiSettings] = useState({
-    consensusThreshold: 3,
+    consensusThreshold: 2,
     temperature: 0.3,
     enableExternalApi: true
   });
@@ -281,18 +281,18 @@ export const SettingsPage: React.FC = () => {
           <div>
             <div className="flex justify-between mb-1">
               <label className="block text-sm font-medium text-gray-300">PR Verification Consensus Threshold</label>
-              <span className="text-sm text-green-400 font-medium">{aiSettings.consensusThreshold} / 4 Models</span>
+              <span className="text-sm text-green-400 font-medium">{aiSettings.consensusThreshold} / 2 Models</span>
             </div>
             <p className="text-xs text-gray-500 mb-3">How many models must approve a PR before it's marked safe to merge.</p>
             <input 
-              type="range" min="2" max="4" step="1" 
+              type="range" min="1" max="2" step="1" 
               value={aiSettings.consensusThreshold}
               onChange={(e) => setAiSettings({...aiSettings, consensusThreshold: parseInt(e.target.value)})}
               className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-500"
             />
             <div className="flex justify-between text-xs text-gray-500 mt-2">
-              <span>Lenient (2/4)</span>
-              <span>Strict (4/4)</span>
+              <span>Lenient (1/2)</span>
+              <span>Strict (2/2)</span>
             </div>
           </div>
 

@@ -150,7 +150,7 @@ Return ONLY valid JSON matching this schema:
   "suggestions": ["string"]
 }}
 """
-        models = [self.MODEL_PRO, self.MODEL_FLASH, self.MODEL_STABLE_PRO, self.MODEL_STABLE_FLASH]
+        models = [self.MODEL_PRO, self.MODEL_FLASH]
         
         # Run all models in parallel using the review client
         tasks = [self.generate(prompt, m, system_prompt=SYSTEM_PROMPT_REVIEWER, json_mode=True, client=self.review_client) for m in models]
@@ -195,9 +195,8 @@ Return ONLY valid JSON matching this schema:
                     ))
         
         consensus_score = sum(1 for r in parsed_results if r.approved)
-        # Consensus: 3/4 models approved OR weighted score >= 3
-        # Spec says: consensus_score = count of models that approved (out of 4), safe_to_merge = consensus_score >= 3
-        safe_to_merge = consensus_score >= 3
+        # Consensus: 2/2 models approved
+        safe_to_merge = consensus_score >= 2
         
         # Generate overall summary using the lightest model
         summary_prompt = f"Summarize these PR verification results from multiple AI models into a single concise paragraph:\n{json.dumps([r.model_dump() for r in parsed_results])}"
