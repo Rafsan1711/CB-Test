@@ -178,6 +178,23 @@ class GitHubService:
                 raise HTTPException(status_code=resp.status_code, detail="Failed to fetch PR diff")
             return resp.text
 
+    async def get_check_run_logs(self, full_name: str, check_run_id: int) -> str:
+        url = f"https://api.github.com/repos/{full_name}/check-runs/{check_run_id}"
+        headers = {
+            "Authorization": f"Bearer {settings.GITHUB_TOKEN}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code != 200:
+                return "Failed to fetch check run details."
+            data = resp.json()
+            output = data.get("output", {})
+            title = output.get("title", "No Title")
+            summary = output.get("summary", "No Summary")
+            text = output.get("text", "No Text")
+            return f"Title: {title}\nSummary: {summary}\nText: {text}"
+
     # --- Webhook Operations ---
 
     async def register_webhook(self, full_name: str, webhook_url: str, secret: str) -> int:

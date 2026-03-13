@@ -111,6 +111,10 @@ Issue Details:
 {json.dumps(issue)}
 
 Instruction: Generate a COMPLETE implementation. Consider all existing code patterns.
+IMPORTANT: Only include 'Closes #<issue_number>' in the pr_body if the Issue Details explicitly mention an issue number.
+IMPORTANT: You MUST write unit and integration tests for all new features and bug fixes.
+IMPORTANT: Perform a security audit on your generated code and ensure no vulnerabilities are introduced.
+IMPORTANT: Update README.md and any other relevant internal documentation to reflect your changes.
 Return ONLY valid JSON matching this schema:
 {{
   "implementation_plan": ["step 1", "step 2"],

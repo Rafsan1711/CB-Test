@@ -87,7 +87,8 @@ body:
 <!-- What does this PR do? -->
 
 ## Related Issue
-Closes #
+<!-- If this PR resolves an issue, uncomment the line below and add the issue number -->
+<!-- Closes # -->
 
 ## Type of Change
 - [ ] Bug fix

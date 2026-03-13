@@ -56,9 +56,21 @@ async def github_webhook(
                     orchestrator.handle_user_response, repo_id, issue_id, comment_body
                 )
     
+    elif x_github_event == "pull_request" and action == "opened":
+        pr_number = payload["pull_request"]["number"]
+        background_tasks.add_task(orchestrator.handle_new_pr, repo_id, pr_number)
+        
     elif x_github_event == "pull_request" and action == "closed":
         if payload["pull_request"].get("merged"):
             pr_number = payload["pull_request"]["number"]
             background_tasks.add_task(orchestrator.handle_pr_merged, repo_id, pr_number)
-    
+            
+    elif x_github_event == "check_run" and action == "completed":
+        if payload["check_run"]["conclusion"] == "failure":
+            # Find the PR associated with this check run
+            pull_requests = payload["check_run"].get("pull_requests", [])
+            for pr in pull_requests:
+                pr_number = pr["number"]
+                background_tasks.add_task(orchestrator.handle_ci_failure, repo_id, pr_number, payload["check_run"]["id"])
+                
     return {"status": "received", "event": x_github_event, "action": action}

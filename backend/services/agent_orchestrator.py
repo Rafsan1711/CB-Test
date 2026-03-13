@@ -113,9 +113,17 @@ class AgentOrchestrator:
             await db.update_issue(issue_id, {"status": "rejected"})
             await db.log_activity(repo_id, "issue_rejected", f"Issue {issue_id} rejected by user")
 
+    async def handle_new_pr(self, repo_id: str, pr_number: int):
+        """Called by webhook when a new PR is opened."""
+        await self.enqueue_task(repo_id, "verify_pr", {"github_pr_number": pr_number}, TaskPriority.HIGH)
+
     async def handle_pr_merged(self, repo_id: str, pr_number: int):
         """Called by webhook when a PR is merged."""
         await self.enqueue_task(repo_id, "process_pr_merge", {"github_pr_number": pr_number}, TaskPriority.HIGH)
+
+    async def handle_ci_failure(self, repo_id: str, pr_number: int, check_run_id: int):
+        """Called by webhook when a CI check fails."""
+        await self.enqueue_task(repo_id, "fix_ci", {"github_pr_number": pr_number, "check_run_id": check_run_id}, TaskPriority.HIGH)
 
     async def retry_task(self, task_id: str):
         """Re-enqueue a failed or cancelled task."""
@@ -233,6 +241,8 @@ class AgentOrchestrator:
             await self._handle_revise_code(item)
         elif item.task_type == "process_pr_merge":
             await self._handle_pr_merged(item)
+        elif item.task_type == "fix_ci":
+            await self._handle_fix_ci(item)
         elif item.task_type == "repo_ingestion":
             await self._handle_repo_ingestion(item)
         elif item.task_type == "install_templates":
@@ -426,10 +436,13 @@ Reply **`no`** to close this issue."""
                 pass
                 
         # Create PR
+        default_title = f"Fix #{github_issue_number}" if github_issue_number else "Automated Fix"
+        default_body = f"Resolves #{github_issue_number}" if github_issue_number else "Automated implementation by ContriBot."
+        
         pr_number = await github_svc.create_pull_request(
             full_name, 
-            plan.get("pr_title", f"Fix #{github_issue_number}"), 
-            plan.get("pr_body", f"Resolves #{github_issue_number}"), 
+            plan.get("pr_title", default_title), 
+            plan.get("pr_body", default_body), 
             branch_name
         )
         
@@ -488,6 +501,21 @@ _(2 AI models are reviewing this PR. Results below.)_"""
         
         consensus = await gemini_svc.verify_pr_multimodel(diff, pr_data["title"], pr_data["body"], context)
         
+        if not pr_id:
+            # Check if it exists in DB by github_pr_number
+            prs = await db.get_prs_by_repo(item.repo_id)
+            db_pr = next((p for p in prs if p.get("github_pr_number") == github_pr_number), None)
+            if db_pr:
+                pr_id = db_pr["id"]
+            else:
+                # Create it
+                db_pr = await db.create_pr(item.repo_id, {
+                    "github_pr_number": github_pr_number,
+                    "title": pr_data["title"],
+                    "status": "open"
+                })
+                pr_id = db_pr["id"]
+                
         # Update DB
         if pr_id:
             await db.update_pr(pr_id, {
@@ -565,6 +593,71 @@ Return ONLY valid JSON matching the write_code schema.
         
         # Re-enqueue verification
         await self.enqueue_task(item.repo_id, "verify_pr", {"pr_id": pr_id, "github_pr_number": github_pr_number}, TaskPriority.HIGH)
+
+    async def _handle_fix_ci(self, item: QueueItem):
+        github_pr_number = item.input_data.get("github_pr_number")
+        check_run_id = item.input_data.get("check_run_id")
+        
+        repo = await db.get_repo_by_id(item.repo_id)
+        full_name = repo["github_full_name"]
+        
+        # Get PR and diff
+        pr_data = await github_svc.get_pull_request(full_name, github_pr_number)
+        branch_name = pr_data["head"]["ref"]
+        
+        # Only fix CI for ContriBot's own PRs
+        if not branch_name.startswith("contribot/"):
+            logger.info(f"Skipping CI fix for PR #{github_pr_number} as it was not created by ContriBot.")
+            return
+            
+        diff = await github_svc.get_pr_diff(full_name, github_pr_number)
+        context = await repo_context_service.get_context(item.repo_id, full_name)
+        
+        # Get CI logs
+        ci_logs = await github_svc.get_check_run_logs(full_name, check_run_id)
+        
+        # Gemini 3.1 Pro fixes the CI failure
+        prompt = f"""
+Your implementation for PR #{github_pr_number} failed CI checks.
+CI Failure Logs:
+{ci_logs}
+
+Original PR Diff:
+{diff}
+
+Repo Context:
+{json.dumps(context)}
+
+Please FIX the implementation to resolve the CI failure.
+Return ONLY valid JSON matching the write_code schema.
+"""
+        res = await gemini_svc.generate(prompt, gemini_svc.MODEL_PRO, system_prompt=gemini_svc.SYSTEM_PROMPT_ENGINEER, json_mode=True)
+        plan = json.loads(res)
+        
+        # Apply changes
+        for f in plan.get("files_to_create", []):
+            await github_svc.create_or_update_file(full_name, f["path"], f["content"], f"fix: CI failure - create {f['path']}", branch_name)
+        for f in plan.get("files_to_modify", []):
+            await github_svc.create_or_update_file(full_name, f["path"], f["modified_content"], f"fix: CI failure - update {f['path']}", branch_name)
+        for path in plan.get("files_to_delete", []):
+            try:
+                repo_obj = github_svc.client.get_repo(full_name)
+                contents = repo_obj.get_contents(path, ref=branch_name)
+                repo_obj.delete_file(path, f"fix: CI failure - delete {path}", contents.sha, branch=branch_name)
+            except Exception:
+                pass
+            
+        comment = "🔁 ContriBot has analyzed the CI failure and pushed a fix. Re-running checks..."
+        await github_svc.add_issue_comment(full_name, github_pr_number, comment)
+        
+        # Re-enqueue verification if needed, or let the next CI run trigger it
+        # We don't need to re-enqueue verify_pr here because the push will trigger a new CI run,
+        # and if it passes, we might want to verify. But wait, PR verification doesn't wait for CI.
+        # Let's just re-enqueue verify_pr.
+        prs = await db.get_prs_by_repo(item.repo_id)
+        db_pr = next((p for p in prs if p.get("github_pr_number") == github_pr_number), None)
+        if db_pr:
+            await self.enqueue_task(item.repo_id, "verify_pr", {"pr_id": db_pr["id"], "github_pr_number": github_pr_number}, TaskPriority.HIGH)
 
     async def _handle_pr_merged(self, item: QueueItem):
         github_pr_number = item.input_data.get("github_pr_number")
@@ -658,12 +751,15 @@ Return ONLY valid JSON matching the write_code schema.
             
         new_changelog = f"# Changelog\n\n## {new_version}\n{release_notes}\n\n" + changelog_content.replace("# Changelog\n\n", "")
         
+        repo_data = await github_svc.get_repo(full_name)
+        default_branch = repo_data.get("default_branch", "main")
+        
         await github_svc.create_or_update_file(
             full_name=full_name,
             path="CHANGELOG.md",
             content=new_changelog,
             message=f"chore: update CHANGELOG for {new_version}",
-            branch="main"
+            branch=default_branch
         )
         
         # Update DB
