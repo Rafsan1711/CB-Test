@@ -62,6 +62,9 @@ async def activate_repo(repo_id: str, current_user: dict = Depends(get_current_u
         webhook_secret = secrets.token_hex(20)
         
     base_url = os.getenv("WEBHOOK_BASE_URL", "").rstrip("/")
+    if base_url.startswith("http://") and ".run.app" in base_url:
+        base_url = base_url.replace("http://", "https://", 1)
+        
     webhook_hook_id = repo.get("webhook_hook_id")
     
     if base_url and not webhook_hook_id:
@@ -227,13 +230,30 @@ async def get_repo_health(repo_id: str, current_user: dict = Depends(get_current
     if not repo:
         raise HTTPException(status_code=404, detail="Repo not found")
         
+    # Get recent errors
     errors = await error_service.get_errors(repo_id=repo_id, since_hours=24)
     
+    # Get last webhook activity
+    activities = await db.get_activity_log(repo_id, limit=20)
+    last_webhook = next((a for a in activities if a["event_type"] == "webhook_received"), None)
+    
+    # Get running/queued tasks
+    tasks = await db.get_agent_tasks_by_repo(repo_id)
+    running = len([t for t in tasks if t["status"] == "running"])
+    queued = len([t for t in tasks if t["status"] == "pending"])
+    
+    webhook_status = "active" if repo.get("contribot_active") and repo.get("webhook_hook_id") else "inactive"
+    
+    last_webhook_str = "Never"
+    if last_webhook:
+        # Simple relative time
+        last_webhook_str = "Recently"
+        
     return {
-        "webhook_status": "active",
-        "last_webhook": "5 minutes ago",
-        "tasks_running": 0,
-        "tasks_queued": 0,
+        "webhook_status": webhook_status,
+        "last_webhook": last_webhook_str,
+        "tasks_running": running,
+        "tasks_queued": queued,
         "error_count_24h": len(errors),
         "rate_limit_remaining": 4950
     }

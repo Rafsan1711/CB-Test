@@ -312,6 +312,8 @@ class AgentOrchestrator:
         repo = await db.get_repo_by_id(item.repo_id)
         full_name = repo["github_full_name"]
         start_time = asyncio.get_event_loop().time()
+        
+        await self._log(item.repo_id, "sync_issues", f"Fetching issues from GitHub for {full_name}", item.task_id, start_time)
         github_issues = await github_svc.list_open_issues(full_name)
         
         existing_issues = await db.get_issues_by_repo(item.repo_id)
@@ -330,7 +332,7 @@ class AgentOrchestrator:
                 await self.enqueue_task(item.repo_id, "analyze_issue", {"github_issue_number": issue["number"]}, TaskPriority.NORMAL)
                 count += 1
         
-        await self._log(item.repo_id, "sync_issues", f"Synced {count} new issues and triggered analysis", item.task_id, start_time)
+        await self._log(item.repo_id, "sync_issues", f"Issue sync complete. Found {count} new issues to analyze.", item.task_id, start_time)
 
     async def _handle_analyze_issue(self, item: QueueItem):
         github_issue_number = item.input_data.get("github_issue_number")
@@ -824,8 +826,10 @@ Return ONLY valid JSON matching the write_code schema.
         repo = await db.get_repo_by_id(item.repo_id)
         full_name = repo["github_full_name"]
         start_time = asyncio.get_event_loop().time()
+        
+        await self._log(item.repo_id, "build_context", f"Building repository context for {full_name}. This may take a minute...", item.task_id, start_time)
         await repo_context_service.get_context(item.repo_id, full_name, force_rebuild=True)
-        await self._log(item.repo_id, "context_built", "Full repository context rebuilt successfully", item.task_id, start_time)
+        await self._log(item.repo_id, "build_context", f"Repository context rebuilt successfully for {full_name}.", item.task_id, start_time)
 
 # Export singleton
 orchestrator = AgentOrchestrator()
