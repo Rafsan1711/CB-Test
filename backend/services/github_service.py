@@ -2,6 +2,7 @@ import asyncio
 import hmac
 import hashlib
 import httpx
+from typing import Optional, List, Dict, Any
 from github import Github, GithubException
 from fastapi import HTTPException
 from config import settings
