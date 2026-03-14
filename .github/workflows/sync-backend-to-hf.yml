@@ -1,0 +1,48 @@
+name: Sync Backend → HuggingFace Space
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  sync-to-hf-space:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Push backend/ to HF Space via git
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          cd backend
+
+          # README.md তৈরি করো HF Space config সহ
+          cat > README.md << 'EOF'
+          ---
+          title: ContriBot
+          emoji: 🤖
+          colorFrom: blue
+          colorTo: purple
+          sdk: docker
+          app_file: main.py
+          pinned: false
+          ---
+
+          ContriBot Backend API
+          EOF
+
+          git init -b main
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git add .
+          git commit -m "sync: backend from GitHub Actions $(date +'%Y-%m-%d %H:%M:%S')"
+          git push https://Rafs-an09002:$HF_TOKEN@huggingface.co/spaces/Rafs-an09002/ContriBot main --force
