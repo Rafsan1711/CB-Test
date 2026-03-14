@@ -180,6 +180,10 @@ class SupabaseService:
         res = self.client.table("agent_tasks").select("*").eq("id", task_id).execute()
         return res.data[0] if res.data else None
 
+    async def get_agent_tasks_by_repo(self, repo_id: str) -> List[dict]:
+        res = self.client.table("agent_tasks").select("*").eq("repo_id", repo_id).execute()
+        return res.data
+
     # --- Releases ---
     async def create_release(self, repo_id: str, version: str, bump_type: str, release_notes: str, github_release_url: str, tag_name: str) -> dict:
         data = {
