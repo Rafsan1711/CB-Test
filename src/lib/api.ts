@@ -259,6 +259,10 @@ export const apiService = {
     retryTask: async (taskId: string) => {
       const res = await api.post(`/agent/tasks/${taskId}/retry`);
       return res.data;
+    },
+    testAI: async () => {
+      const res = await api.get('/agent/test-ai');
+      return res.data;
     }
   }
 };

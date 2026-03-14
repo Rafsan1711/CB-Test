@@ -46,6 +46,7 @@ class GeminiService:
     MODEL_FLASH_LITE = "gemini-3.1-flash-lite-preview"
     MODEL_STABLE_PRO = "gemini-2.5-pro"
     MODEL_STABLE_FLASH = "gemini-2.5-flash"
+    MODEL_DEEPSEEK = "deepseek-ai/DeepSeek-R1-0528:together"
 
     def __init__(self):
         self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
@@ -64,8 +65,20 @@ class GeminiService:
             text = text[:-3]
         return text.strip()
 
-    async def generate(self, prompt: str, model: str, system_prompt: str = None, json_mode: bool = False, temperature: float = 0.3, client: genai.Client = None) -> str:
+    async def generate(self, prompt: str, model: str = None, system_prompt: str = None, json_mode: bool = False, temperature: float = 0.3, client: genai.Client = None, preferred_model: str = None) -> str:
+        """Generate content using Gemini with fallback to DeepSeek-R1."""
         target_client = client or self.client
+        
+        # If preferred_model is DeepSeek, go straight there
+        if preferred_model == "deepseek":
+            try:
+                return await self._generate_with_deepseek(prompt, system_prompt, json_mode, temperature)
+            except Exception as e:
+                logger.error(f"Preferred model DeepSeek failed: {e}. Falling back to Gemini.")
+                # Continue to Gemini if DeepSeek fails
+        
+        model = model or self.MODEL_FLASH
+        
         config_args = {
             "temperature": temperature,
         }
@@ -98,16 +111,20 @@ class GeminiService:
                 return text
             except Exception as e:
                 error_msg = str(e)
-                if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-                    # Fallback to DeepSeek if Gemini quota is hit and HF_TOKEN is configured
-                    if settings.HF_TOKEN:
-                        try:
-                            return await self._generate_with_deepseek(prompt, system_prompt, json_mode, temperature)
-                        except Exception as fallback_err:
-                            logger.error(f"Fallback to DeepSeek failed: {fallback_err}")
-                            # Continue to retry Gemini or raise original error
-                    
-                    error_msg = "Gemini API Quota Exceeded. Please check your Google AI Studio billing/plan. Free tier is limited to 20 requests per day."
+                is_quota_error = "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg
+                
+                # Fallback to DeepSeek if Gemini quota is hit OR if it's the last attempt and we have a token
+                if settings.HF_TOKEN and (is_quota_error or attempt == 2):
+                    try:
+                        reason = "quota hit" if is_quota_error else "final attempt failed"
+                        logger.warning(f"Gemini error ({reason}). Falling back to DeepSeek-R1 (Attempt {attempt+1})")
+                        return await self._generate_with_deepseek(prompt, system_prompt, json_mode, temperature)
+                    except Exception as fallback_err:
+                        logger.error(f"Fallback to DeepSeek failed: {fallback_err}")
+                        # If fallback also fails, we either retry Gemini or raise
+                
+                if is_quota_error:
+                    error_msg = "Gemini API Quota Exceeded. Please check your Google AI Studio billing/plan. Free tier is limited to 15 requests per minute."
                 
                 logger.warning(f"Gemini API error on attempt {attempt + 1} for model {model}: {error_msg}")
                 if attempt == 2:
@@ -119,7 +136,8 @@ class GeminiService:
         if not settings.HF_TOKEN:
             raise Exception("Hugging Face token (HF_TOKEN) not configured for fallback.")
             
-        logger.info("Falling back to DeepSeek-R1 on Hugging Face...")
+        model_name = "deepseek-ai/DeepSeek-R1-0528:together"
+        logger.info(f"Calling DeepSeek-R1 on Hugging Face Router ({model_name})...")
         
         url = "https://router.huggingface.co/v1/chat/completions"
         headers = {
@@ -133,7 +151,7 @@ class GeminiService:
         messages.append({"role": "user", "content": prompt})
         
         payload = {
-            "model": "deepseek-ai/DeepSeek-R1-0528:together",
+            "model": model_name,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": 4096
@@ -162,7 +180,7 @@ class GeminiService:
                 text = self._clean_json_response(text)
             return text
 
-    async def write_code_for_issue(self, repo_context: dict, issue: dict) -> dict:
+    async def write_code_for_issue(self, repo_context: dict, issue: dict, preferred_model: str = None) -> dict:
         prompt = f"""
 Repo Context:
 {json.dumps(repo_context)}
@@ -192,7 +210,7 @@ Return ONLY valid JSON matching this schema:
   "testing_notes": "..."
 }}
 """
-        res = await self.generate(prompt, self.MODEL_PRO, system_prompt=SYSTEM_PROMPT_ENGINEER, json_mode=True)
+        res = await self.generate(prompt, self.MODEL_PRO, system_prompt=SYSTEM_PROMPT_ENGINEER, json_mode=True, preferred_model=preferred_model)
         return json.loads(res)
 
     async def verify_pr_multimodel(self, diff: str, pr_title: str, pr_body: str, repo_context: dict) -> ConsensusSummary:
@@ -273,7 +291,7 @@ Return ONLY valid JSON matching this schema:
             summary=summary
         )
 
-    async def analyze_issue(self, issue_title: str, issue_body: str, repo_context: dict) -> dict:
+    async def analyze_issue(self, issue_title: str, issue_body: str, repo_context: dict, preferred_model: str = None) -> dict:
         prompt = f"""
 Repo Context:
 {json.dumps(repo_context)}
@@ -298,7 +316,7 @@ Analyze this issue. Return ONLY valid JSON matching this schema:
   "questions_for_owner": ["..."]
 }}
 """
-        res = await self.generate(prompt, self.MODEL_FLASH, system_prompt=SYSTEM_PROMPT_ANALYST, json_mode=True)
+        res = await self.generate(prompt, self.MODEL_FLASH, system_prompt=SYSTEM_PROMPT_ANALYST, json_mode=True, preferred_model=preferred_model)
         return json.loads(res)
 
     async def determine_version_bump(self, pr_titles: list[str], commit_messages: list[str], current_version: str) -> dict:
@@ -322,5 +340,33 @@ Expected JSON format:
         
         res = await self.generate(prompt, self.MODEL_FLASH, system_prompt=system_prompt)
         return res
+
+    async def test_ai_connection(self) -> dict:
+        """Test connections to both Gemini and DeepSeek."""
+        results = {
+            "gemini": {"status": "unknown", "error": None},
+            "deepseek": {"status": "unknown", "error": None}
+        }
+        
+        # Test Gemini
+        try:
+            await self.generate("Hello, are you there?", model=self.MODEL_FLASH_LITE, temperature=0.1)
+            results["gemini"]["status"] = "ok"
+        except Exception as e:
+            results["gemini"]["status"] = "error"
+            results["gemini"]["error"] = str(e)
+            
+        # Test DeepSeek
+        if settings.HF_TOKEN:
+            try:
+                await self._generate_with_deepseek("Hello, are you there?", temperature=0.1)
+                results["deepseek"]["status"] = "ok"
+            except Exception as e:
+                results["deepseek"]["status"] = "error"
+                results["deepseek"]["error"] = str(e)
+        else:
+            results["deepseek"]["status"] = "not_configured"
+            
+        return results
 
 gemini_svc = GeminiService()

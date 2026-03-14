@@ -5,7 +5,15 @@ from services.supabase_service import db
 from services.agent_orchestrator import orchestrator
 from models.schemas import AgentTaskResponse
 
+from services.gemini_service import gemini_svc
+
 router = APIRouter()
+
+@router.get("/test-ai")
+async def test_ai_connection(current_user: dict = Depends(get_current_user)):
+    """Test connections to both Gemini and DeepSeek."""
+    results = await gemini_svc.test_ai_connection()
+    return results
 
 @router.get("/tasks", response_model=List[AgentTaskResponse])
 async def list_tasks(repo_id: Optional[str] = Query(None), status: Optional[str] = Query(None), current_user: dict = Depends(get_current_user)):

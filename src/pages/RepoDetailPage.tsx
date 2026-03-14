@@ -14,7 +14,7 @@ export const RepoDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'overview' | 'issues' | 'prs' | 'releases' | 'activity' | 'errors'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'issues' | 'prs' | 'releases' | 'activity' | 'errors' | 'settings'>('overview');
   const [isContextExpanded, setIsContextExpanded] = useState(false);
 
   const { data: repo, isLoading: repoLoading } = useQuery({
@@ -72,6 +72,39 @@ export const RepoDetailPage: React.FC = () => {
     }
   });
 
+  const updateRepoMutation = useMutation({
+    mutationFn: (data: any) => apiService.repos.updateRepo(id!, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['repo', id] });
+      toast.success('Settings updated');
+    }
+  });
+
+  const syncIssuesMutation = useMutation({
+    mutationFn: () => apiService.repos.syncIssues(id!),
+    onSuccess: () => {
+      toast.success('Issue sync started');
+    }
+  });
+
+  const testAIMutation = useMutation({
+    mutationFn: () => apiService.tasks.testAI(),
+    onSuccess: (data: any) => {
+      const geminiStatus = data.gemini.status === 'ok' ? '✅ Gemini OK' : `❌ Gemini Error: ${data.gemini.error}`;
+      const deepseekStatus = data.deepseek.status === 'ok' ? '✅ DeepSeek OK' : 
+                            data.deepseek.status === 'not_configured' ? '⚪ DeepSeek Not Configured' :
+                            `❌ DeepSeek Error: ${data.deepseek.error}`;
+      
+      toast((t) => (
+        <div className="flex flex-col gap-2">
+          <p className="font-bold">AI Connection Test Results:</p>
+          <p className="text-sm">{geminiStatus}</p>
+          <p className="text-sm">{deepseekStatus}</p>
+        </div>
+      ), { duration: 5000 });
+    }
+  });
+
   if (repoLoading) {
     return <div className="text-gray-400">Loading repository details...</div>;
   }
@@ -80,13 +113,14 @@ export const RepoDetailPage: React.FC = () => {
     return <div className="text-red-400">Repository not found.</div>;
   }
 
-  const tabs: { id: 'overview' | 'issues' | 'prs' | 'releases' | 'activity' | 'errors', label: string, icon: any, badge?: number }[] = [
+  const tabs: { id: 'overview' | 'issues' | 'prs' | 'releases' | 'activity' | 'errors' | 'settings', label: string, icon: any, badge?: number }[] = [
     { id: 'overview', label: 'Overview', icon: Activity },
     { id: 'issues', label: 'Issues', icon: AlertCircle },
     { id: 'prs', label: 'Pull Requests', icon: GitPullRequest },
     { id: 'releases', label: 'Releases', icon: Tag },
     { id: 'activity', label: 'Activity Log', icon: Clock },
     { id: 'errors', label: 'Errors', icon: ShieldAlert, badge: health?.error_count_24h || 0 },
+    { id: 'settings', label: 'Settings', icon: Settings2 },
   ];
 
   return (
@@ -411,6 +445,95 @@ export const RepoDetailPage: React.FC = () => {
                 </table>
               </div>
             )}
+          </div>
+        )}
+        {activeTab === 'settings' && (
+          <div className="max-w-2xl space-y-8">
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+              <h3 className="text-lg font-semibold text-gray-100 mb-6">AI Model Settings</h3>
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">
+                    Preferred AI Model
+                  </label>
+                  <p className="text-xs text-gray-500 mb-4">
+                    Choose which model ContriBot should use for analysis and code generation. 
+                    Gemini is the default, while DeepSeek-R1 serves as a high-performance fallback.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <button
+                      onClick={() => updateRepoMutation.mutate({ settings: { ...repo.settings, preferred_model: 'gemini' } })}
+                      className={`p-4 rounded-xl border text-left transition-all ${
+                        (repo.settings?.preferred_model || 'gemini') === 'gemini'
+                          ? 'bg-blue-500/10 border-blue-500/50 text-blue-400'
+                          : 'bg-gray-950 border-gray-800 text-gray-400 hover:border-gray-700'
+                      }`}
+                    >
+                      <div className="font-bold mb-1">Google Gemini</div>
+                      <div className="text-xs opacity-70">Default. Fast & balanced.</div>
+                    </button>
+                    <button
+                      onClick={() => updateRepoMutation.mutate({ settings: { ...repo.settings, preferred_model: 'deepseek' } })}
+                      className={`p-4 rounded-xl border text-left transition-all ${
+                        repo.settings?.preferred_model === 'deepseek'
+                          ? 'bg-purple-500/10 border-purple-500/50 text-purple-400'
+                          : 'bg-gray-950 border-gray-800 text-gray-400 hover:border-gray-700'
+                      }`}
+                    >
+                      <div className="font-bold mb-1">DeepSeek-R1</div>
+                      <div className="text-xs opacity-70">Advanced reasoning. Manual selection.</div>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="pt-6 border-t border-gray-800">
+                  <h4 className="text-sm font-medium text-gray-300 mb-4">Manual Actions</h4>
+                  <div className="flex flex-wrap gap-4">
+                    <button
+                      onClick={() => syncIssuesMutation.mutate()}
+                      disabled={syncIssuesMutation.isPending}
+                      className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-200 text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${syncIssuesMutation.isPending ? 'animate-spin' : ''}`} />
+                      Sync GitHub Issues
+                    </button>
+                    <button
+                      onClick={() => rebuildContextMutation.mutate()}
+                      disabled={rebuildContextMutation.isPending}
+                      className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-200 text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${rebuildContextMutation.isPending ? 'animate-spin' : ''}`} />
+                      Rebuild Code Context
+                    </button>
+                    <button
+                      onClick={() => testAIMutation.mutate()}
+                      disabled={testAIMutation.isPending}
+                      className="px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-sm font-medium rounded-lg border border-blue-500/20 transition-colors flex items-center gap-2"
+                    >
+                      <Bot className={`w-4 h-4 ${testAIMutation.isPending ? 'animate-spin' : ''}`} />
+                      {testAIMutation.isPending ? 'Testing...' : 'Test AI Connection'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-6">
+              <h3 className="text-lg font-semibold text-red-400 mb-2">Danger Zone</h3>
+              <p className="text-sm text-gray-400 mb-6">
+                Removing this repository will delete all associated issues, pull requests, and activity logs from ContriBot.
+              </p>
+              <button 
+                onClick={() => {
+                  if (window.confirm('Are you sure you want to remove this repository?')) {
+                    apiService.repos.removeRepo(id!).then(() => navigate('/repos'));
+                  }
+                }}
+                className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-sm font-medium rounded-lg border border-red-500/20 transition-colors"
+              >
+                Remove Repository
+              </button>
+            </div>
           </div>
         )}
       </div>
