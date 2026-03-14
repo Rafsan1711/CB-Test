@@ -66,17 +66,29 @@ class GeminiService:
         return text.strip()
 
     async def generate(self, prompt: str, model: str = None, system_prompt: str = None, json_mode: bool = False, temperature: float = 0.3, client: genai.Client = None, preferred_model: str = None) -> str:
-        """Generate content using Gemini with fallback to DeepSeek-R1."""
+        """Generate content using DeepSeek-R1 as default (if HF_TOKEN exists) with fallback to Gemini."""
         target_client = client or self.client
         
-        # If preferred_model is DeepSeek, go straight there
+        # Determine which model to try first
+        # If preferred_model is explicitly set, respect it. 
+        # Otherwise, if HF_TOKEN is available, default to deepseek.
+        use_deepseek_first = False
         if preferred_model == "deepseek":
+            use_deepseek_first = True
+        elif preferred_model == "gemini":
+            use_deepseek_first = False
+        elif settings.HF_TOKEN:
+            # DEFAULT behavior: Use DeepSeek if token is available
+            use_deepseek_first = True
+            
+        if use_deepseek_first:
             try:
                 return await self._generate_with_deepseek(prompt, system_prompt, json_mode, temperature)
             except Exception as e:
-                logger.error(f"Preferred model DeepSeek failed: {e}. Falling back to Gemini.")
-                # Continue to Gemini if DeepSeek fails
+                logger.error(f"DeepSeek execution failed: {e}. Falling back to Gemini.")
+                # If it was explicitly preferred and failed, we still fallback to Gemini to be safe
         
+        # Gemini Logic
         model = model or self.MODEL_FLASH
         
         config_args = {

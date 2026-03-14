@@ -267,13 +267,13 @@ export const SettingsPage: React.FC = () => {
       <div>
         <h3 className="text-lg font-medium text-white mb-4">Models & Consensus</h3>
         
-        <div className="mb-6 p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+        <div className="mb-6 p-4 bg-purple-500/10 border border-purple-500/20 rounded-lg">
           <div className="flex items-center gap-2 mb-2">
-            <Cpu className="w-5 h-5 text-blue-400" />
-            <h4 className="font-medium text-blue-100">Primary Engine: Gemini 3.1 Pro</h4>
+            <Cpu className="w-5 h-5 text-purple-400" />
+            <h4 className="font-medium text-purple-100">Primary Engine: DeepSeek-R1</h4>
           </div>
-          <p className="text-sm text-blue-200/70">
-            Used for complex code generation and deep issue analysis. Flash models are used for lighter tasks.
+          <p className="text-sm text-purple-200/70">
+            Used for complex code generation and deep issue analysis with superior reasoning. Gemini models serve as high-performance fallbacks.
           </p>
         </div>
 

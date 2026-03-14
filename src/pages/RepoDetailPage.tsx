@@ -458,30 +458,30 @@ export const RepoDetailPage: React.FC = () => {
                   </label>
                   <p className="text-xs text-gray-500 mb-4">
                     Choose which model ContriBot should use for analysis and code generation. 
-                    Gemini is the default, while DeepSeek-R1 serves as a high-performance fallback.
+                    DeepSeek-R1 is now the default for superior reasoning, with Gemini as a fast fallback.
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <button
-                      onClick={() => updateRepoMutation.mutate({ settings: { ...repo.settings, preferred_model: 'gemini' } })}
-                      className={`p-4 rounded-xl border text-left transition-all ${
-                        (repo.settings?.preferred_model || 'gemini') === 'gemini'
-                          ? 'bg-blue-500/10 border-blue-500/50 text-blue-400'
-                          : 'bg-gray-950 border-gray-800 text-gray-400 hover:border-gray-700'
-                      }`}
-                    >
-                      <div className="font-bold mb-1">Google Gemini</div>
-                      <div className="text-xs opacity-70">Default. Fast & balanced.</div>
-                    </button>
-                    <button
                       onClick={() => updateRepoMutation.mutate({ settings: { ...repo.settings, preferred_model: 'deepseek' } })}
                       className={`p-4 rounded-xl border text-left transition-all ${
-                        repo.settings?.preferred_model === 'deepseek'
+                        (repo.settings?.preferred_model || 'deepseek') === 'deepseek'
                           ? 'bg-purple-500/10 border-purple-500/50 text-purple-400'
                           : 'bg-gray-950 border-gray-800 text-gray-400 hover:border-gray-700'
                       }`}
                     >
                       <div className="font-bold mb-1">DeepSeek-R1</div>
-                      <div className="text-xs opacity-70">Advanced reasoning. Manual selection.</div>
+                      <div className="text-xs opacity-70">Default. Advanced reasoning & accuracy.</div>
+                    </button>
+                    <button
+                      onClick={() => updateRepoMutation.mutate({ settings: { ...repo.settings, preferred_model: 'gemini' } })}
+                      className={`p-4 rounded-xl border text-left transition-all ${
+                        repo.settings?.preferred_model === 'gemini'
+                          ? 'bg-blue-500/10 border-blue-500/50 text-blue-400'
+                          : 'bg-gray-950 border-gray-800 text-gray-400 hover:border-gray-700'
+                      }`}
+                    >
+                      <div className="font-bold mb-1">Google Gemini</div>
+                      <div className="text-xs opacity-70">Fast & balanced. Use as alternative.</div>
                     </button>
                   </div>
                 </div>
