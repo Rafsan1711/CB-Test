@@ -97,9 +97,13 @@ class GeminiService:
                     text = self._clean_json_response(text)
                 return text
             except Exception as e:
-                logger.warning(f"Gemini API error on attempt {attempt + 1} for model {model}: {e}")
+                error_msg = str(e)
+                if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                    error_msg = "Gemini API Quota Exceeded. Please check your Google AI Studio billing/plan. Free tier is limited to 20 requests per day."
+                
+                logger.warning(f"Gemini API error on attempt {attempt + 1} for model {model}: {error_msg}")
                 if attempt == 2:
-                    raise e
+                    raise Exception(error_msg)
                 await asyncio.sleep(2 ** attempt)
 
     async def write_code_for_issue(self, repo_context: dict, issue: dict) -> dict:

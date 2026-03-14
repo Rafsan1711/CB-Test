@@ -200,6 +200,12 @@ Expected JSON schema:
             analysis_res = await gemini_svc.generate(analysis_prompt, gemini_svc.MODEL_FLASH, json_mode=True)
             analysis_data = json.loads(analysis_res)
         except Exception as e:
+            error_msg = str(e).lower()
+            # Check for quota errors or our custom quota message
+            if "429" in error_msg or "resource_exhausted" in error_msg or "quota exceeded" in error_msg:
+                # Re-raise for orchestrator to handle retry/backoff
+                raise e
+                
             logger.error(f"Failed to analyze repo context: {e}")
             analysis_data = {
                 "tech_stack": {},
