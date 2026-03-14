@@ -269,15 +269,17 @@ class AgentOrchestrator:
     async def _handle_repo_ingestion(self, item: QueueItem):
         repo = await db.get_repo_by_id(item.repo_id)
         full_name = repo["github_full_name"]
+        start_time = asyncio.get_event_loop().time()
         await repo_context_service.get_context(item.repo_id, full_name, force_rebuild=True)
-        await self._log(item.repo_id, "repo_ingestion", "Repository ingestion complete", item.task_id, asyncio.get_event_loop().time())
+        await self._log(item.repo_id, "repo_ingestion", "Repository ingestion complete", item.task_id, start_time)
 
     async def _handle_install_templates(self, item: QueueItem):
         repo = await db.get_repo_by_id(item.repo_id)
         full_name = repo["github_full_name"]
+        start_time = asyncio.get_event_loop().time()
         from services.template_service import template_svc
         res = await template_svc.install_templates_on_repo(full_name)
-        await self._log(item.repo_id, "install_templates", f"Templates installation: {res['status']}", item.task_id, asyncio.get_event_loop().time())
+        await self._log(item.repo_id, "install_templates", f"Templates installation: {res['status']}", item.task_id, start_time)
 
     async def _handle_install_ci(self, item: QueueItem):
         # This is now handled within install_templates_on_repo in template_svc
@@ -286,6 +288,7 @@ class AgentOrchestrator:
     async def _handle_install_labels(self, item: QueueItem):
         repo = await db.get_repo_by_id(item.repo_id)
         full_name = repo["github_full_name"]
+        start_time = asyncio.get_event_loop().time()
         labels = [
             {"name": "bug", "color": "d73a4a", "description": "Something isn't working"},
             {"name": "enhancement", "color": "a2eeef", "description": "New feature or request"},
@@ -303,11 +306,12 @@ class AgentOrchestrator:
             except Exception:
                 # Label might already exist
                 pass
-        await self._log(item.repo_id, "install_labels", "Standard labels installed", item.task_id, asyncio.get_event_loop().time())
+        await self._log(item.repo_id, "install_labels", "Standard labels installed", item.task_id, start_time)
 
     async def _handle_sync_issues(self, item: QueueItem):
         repo = await db.get_repo_by_id(item.repo_id)
         full_name = repo["github_full_name"]
+        start_time = asyncio.get_event_loop().time()
         github_issues = await github_svc.list_open_issues(full_name)
         
         existing_issues = await db.get_issues_by_repo(item.repo_id)
@@ -326,7 +330,7 @@ class AgentOrchestrator:
                 await self.enqueue_task(item.repo_id, "analyze_issue", {"github_issue_number": issue["number"]}, TaskPriority.NORMAL)
                 count += 1
         
-        await self._log(item.repo_id, "sync_issues", f"Synced {count} new issues and triggered analysis", item.task_id, asyncio.get_event_loop().time())
+        await self._log(item.repo_id, "sync_issues", f"Synced {count} new issues and triggered analysis", item.task_id, start_time)
 
     async def _handle_analyze_issue(self, item: QueueItem):
         github_issue_number = item.input_data.get("github_issue_number")
@@ -365,6 +369,10 @@ class AgentOrchestrator:
             })
             
         # Post Analysis Comment
+        hints = analysis.get('implementation_hints') or []
+        questions = analysis.get('questions_for_owner') or []
+        components = analysis.get('affected_components') or []
+        
         if issue_type == "bug" or not requires_approval:
             comment = f"""## 🤖 ContriBot — Bug Analysis
 
@@ -376,7 +384,7 @@ class AgentOrchestrator:
 {analysis.get('analysis_summary', 'Root cause analysis in progress...')}
 
 ### 🛠️ Fix Plan
-{chr(10).join([f"{i+1}. {hint}" for i, hint in enumerate(analysis.get('implementation_hints', []))])}
+{chr(10).join([f"{i+1}. {hint}" for i, hint in enumerate(hints)]) if hints else "No specific hints provided."}
 
 ContriBot is now implementing this fix automatically..."""
             
@@ -390,13 +398,13 @@ ContriBot is now implementing this fix automatically..."""
 **Priority:** 🟡 {analysis.get('priority', 'Medium').capitalize()}  
 **Estimated Complexity:** {analysis.get('estimated_complexity', 'Moderate').capitalize()}  
 **Estimated Time:** ~{analysis.get('estimated_time_hours', 4)} hours  
-**Affected Areas:** {", ".join([f"`{c}`" for c in analysis.get('affected_components', [])])}
+**Affected Areas:** {", ".join([f"`{c}`" for c in components]) if components else "General"}
 
 ### 📋 What ContriBot Will Do
-{chr(10).join([f"{i+1}. {hint}" for i, hint in enumerate(analysis.get('implementation_hints', []))])}
+{chr(10).join([f"{i+1}. {hint}" for i, hint in enumerate(hints)]) if hints else "No specific hints provided."}
 
 ### ⚠️ Things to Consider
-{chr(10).join([f"- {q}" for q in analysis.get('questions_for_owner', [])])}
+{chr(10).join([f"- {q}" for q in questions]) if questions else "No specific questions."}
 
 ---
 Reply **`yes`** to have ContriBot implement this.  
@@ -784,8 +792,9 @@ Return ONLY valid JSON matching the write_code schema.
     async def _handle_build_context(self, item: QueueItem):
         repo = await db.get_repo_by_id(item.repo_id)
         full_name = repo["github_full_name"]
+        start_time = asyncio.get_event_loop().time()
         await repo_context_service.get_context(item.repo_id, full_name, force_rebuild=True)
-        await self._log(item.repo_id, "context_built", "Full repository context rebuilt successfully", item.task_id, asyncio.get_event_loop().time())
+        await self._log(item.repo_id, "context_built", "Full repository context rebuilt successfully", item.task_id, start_time)
 
 # Export singleton
 orchestrator = AgentOrchestrator()

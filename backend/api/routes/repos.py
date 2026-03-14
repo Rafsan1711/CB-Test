@@ -252,35 +252,25 @@ async def resolve_repo_error(repo_id: str, error_id: str, current_user: dict = D
 
 @router.post("/{repo_id}/sync-issues")
 async def sync_issues(repo_id: str, current_user: dict = Depends(get_current_user)):
-    """Sync open GitHub issues into ContriBot DB"""
+    """Enqueue a task to sync open GitHub issues into ContriBot DB"""
     repo = await db.get_repo_by_id(repo_id)
     if not repo:
         raise HTTPException(status_code=404, detail="Repo not found")
         
-    from services.github_service import github_svc
-    github_issues = await github_svc.list_open_issues(repo["github_full_name"])
+    task_id = await orchestrator.enqueue_task(repo_id, "sync_issues", {})
+    await db.log_activity(repo_id, "sync_started", f"Started issue sync task {task_id}")
     
-    # Get existing issues to avoid duplicates
-    existing_issues = await db.get_issues_by_repo(repo_id)
-    existing_issue_numbers = {issue["github_issue_number"] for issue in existing_issues if issue.get("github_issue_number")}
-    
-    count = 0
-    for issue in github_issues:
-        if issue["number"] in existing_issue_numbers:
-            continue
-            
-        issue_data = {
-            "github_issue_number": issue["number"],
-            "title": issue["title"],
-            "body": issue["body"],
-            "status": "open",
-            "created_at": issue["created_at"]
-        }
-        await db.create_issue(repo_id, issue_data)
-        count += 1
+    return {"message": "Sync started", "task_id": task_id}
+
+@router.post("/{repo_id}/issues/{issue_number}/analyze")
+async def analyze_specific_issue(repo_id: str, issue_number: int, current_user: dict = Depends(get_current_user)):
+    """Manually trigger analysis for a specific issue"""
+    repo = await db.get_repo_by_id(repo_id)
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repo not found")
         
-    await db.log_activity(repo_id, "issues_synced", f"Synced {count} new issues from GitHub")
-    return {"message": "Issues synced successfully", "count": count}
+    task_id = await orchestrator.enqueue_task(repo_id, "analyze_issue", {"github_issue_number": issue_number})
+    return {"message": "Analysis started", "task_id": task_id}
 
 @router.get("/{repo_id}/stats")
 async def get_repo_stats(repo_id: str, current_user: dict = Depends(get_current_user)):

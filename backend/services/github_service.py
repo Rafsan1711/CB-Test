@@ -71,10 +71,11 @@ class GitHubService:
                 raise e
         return await self._run_async(_commit_file)
 
-    async def create_branch(self, full_name: str, branch_name: str, from_branch: str = "main") -> dict:
+    async def create_branch(self, full_name: str, branch_name: str, from_branch: Optional[str] = None) -> dict:
         def _create_branch():
             repo = self.client.get_repo(full_name)
-            source_branch = repo.get_branch(from_branch)
+            base = from_branch or repo.default_branch
+            source_branch = repo.get_branch(base)
             ref = repo.create_git_ref(ref=f"refs/heads/{branch_name}", sha=source_branch.commit.sha)
             return {"ref": ref.ref, "url": ref.url}
         return await self._run_async(_create_branch)
@@ -136,10 +137,11 @@ class GitHubService:
 
     # --- Pull Request Operations ---
 
-    async def create_pull_request(self, full_name: str, title: str, body: str, head: str, base: str = "main") -> int:
+    async def create_pull_request(self, full_name: str, title: str, body: str, head: str, base: Optional[str] = None) -> int:
         def _create_pr():
             repo = self.client.get_repo(full_name)
-            pr = repo.create_pull(title=title, body=body, head=head, base=base)
+            target_base = base or repo.default_branch
+            pr = repo.create_pull(title=title, body=body, head=head, base=target_base)
             return pr.number
         return await self._run_async(_create_pr)
 
