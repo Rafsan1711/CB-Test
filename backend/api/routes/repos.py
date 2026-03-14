@@ -49,13 +49,59 @@ async def delete_repo(repo_id: str, current_user: dict = Depends(get_current_use
 
 @router.post("/{repo_id}/activate")
 async def activate_repo(repo_id: str, current_user: dict = Depends(get_current_user)):
-    repo = await db.update_repo(repo_id, {"contribot_active": True})
+    repo = await db.get_repo_by_id(repo_id)
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repo not found")
+        
+    import os
+    import secrets
+    from services.github_service import github_svc
+    
+    webhook_secret = repo.get("webhook_secret")
+    if not webhook_secret:
+        webhook_secret = secrets.token_hex(20)
+        
+    base_url = os.getenv("WEBHOOK_BASE_URL", "").rstrip("/")
+    webhook_hook_id = repo.get("webhook_hook_id")
+    
+    if base_url and not webhook_hook_id:
+        webhook_url = f"{base_url}/api/v1/webhook/github/{repo_id}"
+        try:
+            hook_id = await github_svc.register_webhook(repo["github_full_name"], webhook_url, webhook_secret)
+            webhook_hook_id = str(hook_id)
+        except Exception as e:
+            print(f"Error registering webhook: {e}")
+            
+    update_data = {
+        "contribot_active": True,
+        "webhook_secret": webhook_secret
+    }
+    if webhook_hook_id:
+        update_data["webhook_hook_id"] = webhook_hook_id
+        
+    repo = await db.update_repo(repo_id, update_data)
     await db.log_activity(repo_id, "repo_activated", "ContriBot activated for repo")
     return repo
 
 @router.post("/{repo_id}/deactivate")
 async def deactivate_repo(repo_id: str, current_user: dict = Depends(get_current_user)):
-    repo = await db.update_repo(repo_id, {"contribot_active": False})
+    repo = await db.get_repo_by_id(repo_id)
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repo not found")
+        
+    from services.github_service import github_svc
+    
+    webhook_hook_id = repo.get("webhook_hook_id")
+    if webhook_hook_id:
+        try:
+            await github_svc.delete_webhook(repo["github_full_name"], int(webhook_hook_id))
+        except Exception as e:
+            print(f"Error deleting webhook: {e}")
+            
+    repo = await db.update_repo(repo_id, {
+        "contribot_active": False,
+        "webhook_hook_id": None
+    })
     await db.log_activity(repo_id, "repo_deactivated", "ContriBot deactivated for repo")
     return repo
 

@@ -205,7 +205,7 @@ class GitHubService:
                 "content_type": "json",
                 "secret": secret
             }
-            events = ["issues", "pull_request", "issue_comment", "push", "release"]
+            events = ["issues", "pull_request", "issue_comment", "push", "release", "check_run"]
             hook = repo.create_hook("web", config, events, active=True)
             return hook.id
         return await self._run_async(_register_hook)
