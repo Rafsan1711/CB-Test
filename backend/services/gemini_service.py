@@ -99,12 +99,68 @@ class GeminiService:
             except Exception as e:
                 error_msg = str(e)
                 if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                    # Fallback to DeepSeek if Gemini quota is hit and HF_TOKEN is configured
+                    if settings.HF_TOKEN:
+                        try:
+                            return await self._generate_with_deepseek(prompt, system_prompt, json_mode, temperature)
+                        except Exception as fallback_err:
+                            logger.error(f"Fallback to DeepSeek failed: {fallback_err}")
+                            # Continue to retry Gemini or raise original error
+                    
                     error_msg = "Gemini API Quota Exceeded. Please check your Google AI Studio billing/plan. Free tier is limited to 20 requests per day."
                 
                 logger.warning(f"Gemini API error on attempt {attempt + 1} for model {model}: {error_msg}")
                 if attempt == 2:
                     raise Exception(error_msg)
                 await asyncio.sleep(2 ** attempt)
+
+    async def _generate_with_deepseek(self, prompt: str, system_prompt: str = None, json_mode: bool = False, temperature: float = 0.3) -> str:
+        """Fallback generator using DeepSeek-R1 on Hugging Face Inference API."""
+        if not settings.HF_TOKEN:
+            raise Exception("Hugging Face token (HF_TOKEN) not configured for fallback.")
+            
+        logger.info("Falling back to DeepSeek-R1 on Hugging Face...")
+        
+        url = "https://router.huggingface.co/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {settings.HF_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        
+        payload = {
+            "model": "deepseek-ai/DeepSeek-R1-0528:together",
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": 4096
+        }
+        
+        # DeepSeek-R1 on Together supports JSON mode via response_format
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(url, headers=headers, json=payload)
+            if response.status_code != 200:
+                raise Exception(f"Hugging Face API error: {response.status_code} - {response.text}")
+            
+            data = response.json()
+            text = data["choices"][0]["message"]["content"]
+            
+            # DeepSeek-R1 often includes <think> blocks. For our JSON/Code tasks, we might want to strip them
+            # if they interfere with JSON parsing, but _clean_json_response should handle it if it's outside the JSON.
+            if "<think>" in text and "</think>" in text:
+                # Strip thinking blocks for cleaner output
+                import re
+                text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+
+            if json_mode:
+                text = self._clean_json_response(text)
+            return text
 
     async def write_code_for_issue(self, repo_context: dict, issue: dict) -> dict:
         prompt = f"""

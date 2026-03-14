@@ -32,14 +32,33 @@ class RepoContextService:
                 
         if needs_rebuild:
             logger.info(f"Building fresh context for {full_name}")
-            context = await self.build_full_context(full_name)
+            try:
+                context = await self.build_full_context(full_name)
+            except Exception as e:
+                # If it's a quota error, and we have a stale cache, return the stale cache instead of failing
+                error_msg = str(e).lower()
+                if ("429" in error_msg or "quota" in error_msg or "resource_exhausted" in error_msg) and last_built:
+                    logger.warning(f"Gemini quota hit while rebuilding context for {full_name}. Falling back to stale cache.")
+                    cached_summary = repo.get("context_summary") or settings.get("context_summary") or {}
+                    return {
+                        "context_built_at": last_built,
+                        "total_files": cached_summary.get("file_count", 0),
+                        "metadata": {"language": cached_summary.get("main_language", "Unknown")},
+                        "tech_stack": cached_summary.get("tech_stack_raw", {}),
+                        "ascii_tree": cached_summary.get("ascii_tree", ""),
+                        "context_summary": cached_summary.get("summary", ""),
+                        "is_stale": True
+                    }
+                raise e
             
             # Save summary to DB
             summary = {
                 "file_count": context.get("total_files", 0),
                 "main_language": context.get("metadata", {}).get("language", "Unknown"),
                 "tech_stack": list(context.get("tech_stack", {}).values()),
-                "summary": context.get("context_summary", "")
+                "tech_stack_raw": context.get("tech_stack", {}),
+                "summary": context.get("context_summary", ""),
+                "ascii_tree": context.get("ascii_tree", "")
             }
             
             now_iso = datetime.datetime.now(timezone.utc).isoformat()
@@ -52,9 +71,6 @@ class RepoContextService:
             }
             
             # Try to update specific columns, fall back to settings if they don't exist
-            update_payload = {"settings": new_settings}
-            
-            # Check if we can update specific columns by trying a small update first or just catch the error
             try:
                 # Attempt to update all columns
                 db.client.table("repos").update({
@@ -84,11 +100,17 @@ class RepoContextService:
             
             return context
         else:
-            logger.info(f"Context for {full_name} is still fresh")
-            # In a real app, we'd store the full context in a bucket.
-            # For now, we rebuild it since we don't store the massive full context in DB.
-            # But we skip the "needs_rebuild" logic if we just want the summary.
-            return await self.build_full_context(full_name)
+            logger.info(f"Context for {full_name} is still fresh. Returning cached summary.")
+            cached_summary = repo.get("context_summary") or settings.get("context_summary") or {}
+            
+            return {
+                "context_built_at": last_built,
+                "total_files": cached_summary.get("file_count", 0),
+                "metadata": {"language": cached_summary.get("main_language", "Unknown")},
+                "tech_stack": cached_summary.get("tech_stack_raw", {}),
+                "ascii_tree": cached_summary.get("ascii_tree", ""),
+                "context_summary": cached_summary.get("summary", "")
+            }
 
     async def build_full_context(self, full_name: str, focus_paths: List[str] = None) -> Dict[str, Any]:
         logger.info(f"Building full context for {full_name}")

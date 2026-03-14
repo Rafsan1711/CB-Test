@@ -199,7 +199,16 @@ async def get_repo_context(repo_id: str, current_user: dict = Depends(get_curren
     if not repo:
         raise HTTPException(status_code=404, detail="Repo not found")
         
-    context = await repo_context_service.get_context(repo_id, repo["github_full_name"])
+    try:
+        context = await repo_context_service.get_context(repo_id, repo["github_full_name"])
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "429" in error_msg or "quota" in error_msg or "resource_exhausted" in error_msg:
+            raise HTTPException(
+                status_code=429, 
+                detail="Gemini API Quota Exceeded. Please try again later or check your billing."
+            )
+        raise e
     
     return {
         "last_built": context.get("context_built_at"),
@@ -207,7 +216,8 @@ async def get_repo_context(repo_id: str, current_user: dict = Depends(get_curren
         "main_language": context.get("metadata", {}).get("language", "Unknown"),
         "tech_stack": list(context.get("tech_stack", {}).values()),
         "tree": context.get("ascii_tree", ""),
-        "summary": context.get("context_summary", "")
+        "summary": context.get("context_summary", ""),
+        "is_stale": context.get("is_stale", False)
     }
 
 @router.get("/{repo_id}/health")
