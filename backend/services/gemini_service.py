@@ -172,7 +172,7 @@ class GeminiService:
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             try:
                 response = await client.post(url, headers=headers, json=payload)
                 if response.status_code != 200:
