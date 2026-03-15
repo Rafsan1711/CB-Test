@@ -169,28 +169,32 @@ class GeminiService:
             "max_tokens": 4096
         }
         
-        # DeepSeek-R1 on Together supports JSON mode via response_format
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
 
         async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(url, headers=headers, json=payload)
-            if response.status_code != 200:
-                raise Exception(f"Hugging Face API error: {response.status_code} - {response.text}")
-            
-            data = response.json()
-            text = data["choices"][0]["message"]["content"]
-            
-            # DeepSeek-R1 often includes <think> blocks. For our JSON/Code tasks, we might want to strip them
-            # if they interfere with JSON parsing, but _clean_json_response should handle it if it's outside the JSON.
-            if "<think>" in text and "</think>" in text:
-                # Strip thinking blocks for cleaner output
-                import re
-                text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+            try:
+                response = await client.post(url, headers=headers, json=payload)
+                if response.status_code != 200:
+                    logger.error(f"Hugging Face API error: {response.status_code} - {response.text}")
+                    raise Exception(f"Hugging Face API error: {response.status_code}")
+                
+                data = response.json()
+                if "choices" not in data or not data["choices"]:
+                    raise Exception("Invalid response format from Hugging Face")
+                
+                text = data["choices"][0]["message"]["content"]
+                
+                if "<think>" in text and "</think>" in text:
+                    import re
+                    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
 
-            if json_mode:
-                text = self._clean_json_response(text)
-            return text
+                if json_mode:
+                    text = self._clean_json_response(text)
+                return text
+            except Exception as e:
+                logger.error(f"DeepSeek generation failed: {e}")
+                raise e
 
     async def write_code_for_issue(self, repo_context: dict, issue: dict, preferred_model: str = None) -> dict:
         prompt = f"""
