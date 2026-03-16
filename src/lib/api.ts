@@ -2,8 +2,9 @@ import axios from 'axios';
 import { auth } from './firebase';
 import toast from 'react-hot-toast';
 
+const backendUrl = import.meta.env.VITE_BACKEND_URL || '';
 const api = axios.create({
-  baseURL: import.meta.env.VITE_BACKEND_URL + '/api/v1',
+  baseURL: `${backendUrl}/api/v1`,
   timeout: 15000, // 15 seconds timeout to allow HF Spaces to wake up
 });
 
