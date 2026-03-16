@@ -18,7 +18,11 @@ class GitHubService:
         try:
             return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
         except GithubException as e:
-            raise HTTPException(status_code=e.status, detail=e.data.get("message", str(e)))
+            if isinstance(e.data, dict):
+                detail = e.data.get("message") or str(e)
+            else:
+                detail = str(e.data) if e.data else str(e)
+            raise HTTPException(status_code=e.status, detail=detail)
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 

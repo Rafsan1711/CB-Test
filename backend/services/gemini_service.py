@@ -70,30 +70,24 @@ class GeminiService:
         target_client = client or self.client
         
         # Determine which model to try first
-        # If preferred_model is explicitly set, respect it. 
-        # Otherwise, if HF_TOKEN is available, default to deepseek.
         use_deepseek_first = False
         if preferred_model == "deepseek":
             use_deepseek_first = True
         elif preferred_model == "gemini":
             use_deepseek_first = False
         elif settings.HF_TOKEN:
-            # DEFAULT behavior: Use DeepSeek if token is available
             use_deepseek_first = True
             
         if use_deepseek_first:
             try:
                 return await self._generate_with_deepseek(prompt, system_prompt, json_mode, temperature)
             except Exception as e:
-                logger.error(f"DeepSeek execution failed: {e}. Falling back to Gemini.")
-                # If it was explicitly preferred and failed, we still fallback to Gemini to be safe
+                logger.error(f"DeepSeek execution failed for prompt (len={len(prompt)}): {e}. Falling back to Gemini.")
         
         # Gemini Logic
         model = model or self.MODEL_FLASH
         
-        config_args = {
-            "temperature": temperature,
-        }
+        config_args = {"temperature": temperature}
         if json_mode:
             config_args["response_mime_type"] = "application/json"
         if system_prompt:
@@ -102,7 +96,7 @@ class GeminiService:
         config = types.GenerateContentConfig(**config_args)
 
         if json_mode:
-            prompt += "\n\nIMPORTANT: Return ONLY valid JSON. Do not include markdown formatting like ```json."
+            prompt += "\n\nIMPORTANT: Return ONLY valid JSON."
 
         for attempt in range(3):
             try:
@@ -112,35 +106,19 @@ class GeminiService:
                     config=config
                 )
                 
-                # Log token usage
-                usage = response.usage_metadata
-                if usage:
-                    logger.info(f"Token usage for {model}: prompt={usage.prompt_token_count}, candidates={usage.candidates_token_count}, total={usage.total_token_count}")
-                
                 text = response.text
                 if json_mode:
                     text = self._clean_json_response(text)
                 return text
             except Exception as e:
                 error_msg = str(e)
-                is_quota_error = "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg
-                
-                # Fallback to DeepSeek if Gemini quota is hit OR if it's the last attempt and we have a token
-                if settings.HF_TOKEN and (is_quota_error or attempt == 2):
-                    try:
-                        reason = "quota hit" if is_quota_error else "final attempt failed"
-                        logger.warning(f"Gemini error ({reason}). Falling back to DeepSeek-R1 (Attempt {attempt+1})")
-                        return await self._generate_with_deepseek(prompt, system_prompt, json_mode, temperature)
-                    except Exception as fallback_err:
-                        logger.error(f"Fallback to DeepSeek failed: {fallback_err}")
-                        # If fallback also fails, we either retry Gemini or raise
-                
-                if is_quota_error:
-                    error_msg = "Gemini API Quota Exceeded. Please check your Google AI Studio billing/plan. Free tier is limited to 15 requests per minute."
+                if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                    logger.error(f"Gemini Quota Exceeded for model {model}. Prompt length: {len(prompt)}")
+                    raise QuotaExceededError("Gemini API Quota Exceeded.")
                 
                 logger.warning(f"Gemini API error on attempt {attempt + 1} for model {model}: {error_msg}")
                 if attempt == 2:
-                    raise Exception(error_msg)
+                    raise Exception(f"Gemini API failed after 3 attempts: {error_msg}")
                 await asyncio.sleep(2 ** attempt)
 
     async def _generate_with_deepseek(self, prompt: str, system_prompt: str = None, json_mode: bool = False, temperature: float = 0.3) -> str:

@@ -61,9 +61,16 @@ async def activate_repo(repo_id: str, current_user: dict = Depends(get_current_u
     if not webhook_secret:
         webhook_secret = secrets.token_hex(20)
         
-    base_url = os.getenv("WEBHOOK_BASE_URL", "").rstrip("/")
+    # Use SHARED_APP_URL by default because APP_URL is protected by authentication and returns 302
+    base_url = os.getenv("WEBHOOK_BASE_URL") or os.getenv("SHARED_APP_URL") or os.getenv("APP_URL", "")
+    base_url = base_url.rstrip("/")
+    
     if base_url.startswith("http://") and ".run.app" in base_url:
         base_url = base_url.replace("http://", "https://", 1)
+        
+    # If the base_url is the dev URL, it will fail with 302. Try to convert it to the pre URL if possible.
+    if "ais-dev-" in base_url:
+        base_url = base_url.replace("ais-dev-", "ais-pre-")
         
     webhook_hook_id = repo.get("webhook_hook_id")
     
