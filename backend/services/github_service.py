@@ -81,8 +81,15 @@ class GitHubService:
             repo = self.client.get_repo(full_name)
             base = from_branch or repo.default_branch
             source_branch = repo.get_branch(base)
-            ref = repo.create_git_ref(ref=f"refs/heads/{branch_name}", sha=source_branch.commit.sha)
-            return {"ref": ref.ref, "url": ref.url}
+            try:
+                ref = repo.create_git_ref(ref=f"refs/heads/{branch_name}", sha=source_branch.commit.sha)
+                return {"ref": ref.ref, "url": ref.url}
+            except GithubException as e:
+                if e.status == 422 and "Reference already exists" in str(e.data):
+                    # Branch already exists, just return it
+                    ref = repo.get_git_ref(f"heads/{branch_name}")
+                    return {"ref": ref.ref, "url": ref.url}
+                raise e
         return await self._run_async(_create_branch)
 
     async def delete_branch(self, full_name: str, branch_name: str) -> dict:
@@ -146,8 +153,16 @@ class GitHubService:
         def _create_pr():
             repo = self.client.get_repo(full_name)
             target_base = base or repo.default_branch
-            pr = repo.create_pull(title=title, body=body, head=head, base=target_base)
-            return pr.number
+            try:
+                pr = repo.create_pull(title=title, body=body, head=head, base=target_base)
+                return pr.number
+            except GithubException as e:
+                if e.status == 422 and "A pull request already exists" in str(e.data):
+                    # Find the existing PR
+                    prs = repo.get_pulls(state="open", head=f"{repo.owner.login}:{head}", base=target_base)
+                    for pr in prs:
+                        return pr.number
+                raise e
         return await self._run_async(_create_pr)
 
     async def get_pull_request(self, full_name: str, pr_number: int) -> dict:

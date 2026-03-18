@@ -426,6 +426,15 @@ Reply **`no`** to close this issue."""
         issue_id = item.input_data.get("issue_id")
         github_issue_number = item.input_data.get("github_issue_number")
         
+        if not github_issue_number and issue_id:
+            issues = await db.get_issues_by_repo(item.repo_id)
+            db_issue = next((i for i in issues if i["id"] == issue_id), None)
+            if db_issue:
+                github_issue_number = db_issue.get("github_issue_number")
+                
+        if not github_issue_number:
+            raise ValueError(f"Missing github_issue_number for task {item.task_id}")
+            
         repo = await db.get_repo_by_id(item.repo_id)
         full_name = repo["github_full_name"]
         preferred_model = repo.get("settings", {}).get("preferred_model")
