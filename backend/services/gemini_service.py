@@ -42,7 +42,7 @@ Output: ONLY valid JSON.
 
 class GeminiService:
     # Model Constants
-    MODEL_PRO = "gemini-3.1-pro-preview"
+    MODEL_PRO = "gemini-2.5-pro"
     MODEL_FLASH = "gemini-3-flash-preview"
     MODEL_FLASH_LITE = "gemini-3.1-flash-lite-preview"
     MODEL_STABLE_PRO = "gemini-2.5-pro"
@@ -54,6 +54,7 @@ class GeminiService:
         # Separate client for reviews if a different key is provided
         review_key = settings.GEMINI_API_KEY_REVIEW or settings.GEMINI_API_KEY
         self.review_client = genai.Client(api_key=review_key)
+        self._hf_token_invalid = False
 
     def _clean_json_response(self, text: str) -> str:
         """Removes markdown code blocks if the model returns them despite instructions."""
@@ -136,6 +137,9 @@ class GeminiService:
         """Fallback generator using DeepSeek-R1 on Hugging Face Inference API."""
         if not settings.HF_TOKEN:
             raise Exception("Hugging Face token (HF_TOKEN) not configured for fallback.")
+        
+        if self._hf_token_invalid:
+            raise Exception("Hugging Face token was previously marked as invalid (401). Skipping DeepSeek.")
             
         model_name = "deepseek-ai/DeepSeek-R1-0528:together"
         logger.info(f"Calling DeepSeek-R1 on Hugging Face Router ({model_name})...")
@@ -164,7 +168,11 @@ class GeminiService:
         async with httpx.AsyncClient(timeout=300.0) as client:
             try:
                 response = await client.post(url, headers=headers, json=payload)
-                if response.status_code != 200:
+                if response.status_code == 401:
+                    self._hf_token_invalid = True
+                    logger.error(f"Hugging Face API error: 401 - Invalid token. Disabling DeepSeek fallback.")
+                    raise Exception("Hugging Face API error: 401")
+                elif response.status_code != 200:
                     logger.error(f"Hugging Face API error: {response.status_code} - {response.text}")
                     raise Exception(f"Hugging Face API error: {response.status_code}")
                 
