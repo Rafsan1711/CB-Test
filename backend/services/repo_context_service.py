@@ -17,6 +17,7 @@ class RepoContextService:
 
     async def get_context(self, repo_id: str, full_name: str, force_rebuild: bool = False) -> Dict[str, Any]:
         """Gets context, rebuilding if stale or forced."""
+        logger.info(f"[CONTEXT] Fetching context for {full_name} (ID: {repo_id}, force_rebuild: {force_rebuild})")
         repo = await db.get_repo_by_id(repo_id)
         # Use settings as fallback if specific columns are missing
         settings = repo.get("settings") or {}
@@ -26,19 +27,21 @@ class RepoContextService:
         if not needs_rebuild and last_built:
             last_built_dt = datetime.datetime.fromisoformat(last_built.replace('Z', '+00:00'))
             if datetime.datetime.now(timezone.utc) - last_built_dt > timedelta(hours=24):
+                logger.info(f"[CONTEXT] Context for {full_name} is stale (last built: {last_built}). Rebuilding.")
                 needs_rebuild = True
         elif not last_built:
+            logger.info(f"[CONTEXT] No previous context found for {full_name}. Building for the first time.")
             needs_rebuild = True
                 
         if needs_rebuild:
-            logger.info(f"Building fresh context for {full_name}")
+            logger.info(f"[CONTEXT] Building fresh context for {full_name}")
             try:
                 context = await self.build_full_context(full_name)
             except Exception as e:
                 # If it's a quota error, and we have a stale cache, return the stale cache instead of failing
                 error_msg = str(e).lower()
                 if ("429" in error_msg or "quota" in error_msg or "resource_exhausted" in error_msg) and last_built:
-                    logger.warning(f"Gemini quota hit while rebuilding context for {full_name}. Falling back to stale cache.")
+                    logger.warning(f"[CONTEXT] Gemini quota hit while rebuilding context for {full_name}. Falling back to stale cache.")
                     cached_summary = repo.get("context_summary") or settings.get("context_summary") or {}
                     return {
                         "context_built_at": last_built,
@@ -49,6 +52,7 @@ class RepoContextService:
                         "context_summary": cached_summary.get("summary", ""),
                         "is_stale": True
                     }
+                logger.error(f"[CONTEXT] Failed to build context for {full_name}: {e}")
                 raise e
             
             # Save summary to DB
@@ -71,6 +75,7 @@ class RepoContextService:
             }
             
             # Try to update specific columns, fall back to settings if they don't exist
+            logger.info(f"[CONTEXT] Saving context summary for {full_name} to database.")
             try:
                 # Attempt to update all columns
                 db.client.table("repos").update({
@@ -78,29 +83,34 @@ class RepoContextService:
                     "context_summary": summary,
                     "settings": new_settings
                 }).eq("id", repo_id).execute()
+                logger.info(f"[CONTEXT] Successfully updated repo {full_name} with new context.")
             except Exception as e:
                 error_msg = str(e)
                 if "column" in error_msg and ("context_summary" in error_msg or "last_context_built_at" in error_msg or "updated_at" in error_msg):
-                    logger.warning(f"Database schema mismatch: {error_msg}. Using settings fallback.")
+                    logger.warning(f"[CONTEXT] Database schema mismatch while saving context for {full_name}: {error_msg}. Using settings fallback.")
                     try:
                         db.client.table("repos").update({
                             "settings": new_settings,
                             "updated_at": now_iso
                         }).eq("id", repo_id).execute()
+                        logger.info(f"[CONTEXT] Successfully updated repo {full_name} using settings fallback.")
                     except Exception as e2:
                         if "updated_at" in str(e2):
                             db.client.table("repos").update({
                                 "settings": new_settings
                             }).eq("id", repo_id).execute()
+                            logger.info(f"[CONTEXT] Successfully updated repo {full_name} using settings fallback (no updated_at).")
                         else:
+                            logger.error(f"[CONTEXT] Failed to save context for {full_name} even with fallback: {e2}")
                             raise e2
                 else:
                     # Some other error, re-raise
+                    logger.error(f"[CONTEXT] Unexpected error saving context for {full_name}: {e}")
                     raise e
             
             return context
         else:
-            logger.info(f"Context for {full_name} is still fresh. Returning cached summary.")
+            logger.info(f"[CONTEXT] Context for {full_name} is still fresh. Returning cached summary.")
             cached_summary = repo.get("context_summary") or settings.get("context_summary") or {}
             
             return {
@@ -113,9 +123,10 @@ class RepoContextService:
             }
 
     async def build_full_context(self, full_name: str, focus_paths: List[str] = None) -> Dict[str, Any]:
-        logger.info(f"Building full context for {full_name}")
+        logger.info(f"[CONTEXT] Building full context for {full_name}. Focus paths: {focus_paths}")
         
         # 1. Repo Metadata & Recent Activity (parallel)
+        logger.debug(f"[CONTEXT] Fetching repo metadata, tree, issues, commits, and pulls for {full_name}")
         repo_task = github_svc.get_repo(full_name)
         tree_task = github_svc.get_repo_tree(full_name)
         issues_task = github_svc.list_open_issues(full_name)
@@ -139,6 +150,7 @@ class RepoContextService:
         )
 
         if isinstance(repo_data, Exception):
+            logger.error(f"[CONTEXT] Failed to fetch repo data for {full_name}: {repo_data}")
             raise repo_data
 
         metadata = {
@@ -153,9 +165,14 @@ class RepoContextService:
             "created_at": repo_data.get("created_at"),
             "updated_at": repo_data.get("updated_at")
         }
+        logger.debug(f"[CONTEXT] Metadata fetched for {full_name}. Language: {metadata['language']}")
 
         # 2. ASCII Folder Tree
         tree_items = tree_data.get("tree", []) if not isinstance(tree_data, Exception) else []
+        if isinstance(tree_data, Exception):
+            logger.warning(f"[CONTEXT] Failed to fetch tree data for {full_name}: {tree_data}")
+        
+        logger.debug(f"[CONTEXT] Generating ASCII tree for {full_name}")
         ascii_tree, file_counts = self._generate_ascii_tree(tree_items, self.max_depth)
 
         # 3. Key Files Content
@@ -177,12 +194,14 @@ class RepoContextService:
                     paths_to_read.add(path)
 
         paths_to_read = list(paths_to_read)
+        logger.info(f"[CONTEXT] Reading {len(paths_to_read)} key files for {full_name}")
         
         async def fetch_file(path):
             try:
                 content = await github_svc.get_file_content(full_name, path)
                 return path, content
             except Exception as e:
+                logger.warning(f"[CONTEXT] Failed to read file {path} in {full_name}: {e}")
                 return path, f"// Error reading file: {str(e)}"
 
         file_results = await asyncio.gather(*[fetch_file(p) for p in paths_to_read])
@@ -191,6 +210,7 @@ class RepoContextService:
 
         # 4 & 5 & 7. Tech Stack, Code Patterns, Dependencies
         # We can use Gemini to analyze the key files and tree to extract this structured info
+        logger.info(f"[CONTEXT] Analyzing tech stack and patterns for {full_name} using Gemini")
         analysis_prompt = f"""
 Analyze the following repository context and extract the tech stack, code patterns, and dependencies.
 Return ONLY valid JSON.
@@ -221,14 +241,16 @@ Expected JSON schema:
         try:
             analysis_res = await gemini_svc.generate(analysis_prompt, gemini_svc.MODEL_FLASH, json_mode=True)
             analysis_data = json.loads(analysis_res)
+            logger.info(f"[CONTEXT] Successfully analyzed {full_name}. Tech stack: {analysis_data.get('tech_stack')}")
         except Exception as e:
             error_msg = str(e).lower()
             # Check for quota errors or our custom quota message
             if "429" in error_msg or "resource_exhausted" in error_msg or "quota exceeded" in error_msg:
+                logger.warning(f"[CONTEXT] Gemini quota hit while analyzing {full_name}")
                 # Re-raise for orchestrator to handle retry/backoff
                 raise e
                 
-            logger.error(f"Failed to analyze repo context: {e}")
+            logger.error(f"[CONTEXT] Failed to analyze repo context for {full_name}: {e}")
             analysis_data = {
                 "tech_stack": {},
                 "code_patterns": {},

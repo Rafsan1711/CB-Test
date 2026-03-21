@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+import logging
 from typing import List, Optional
 from api.middleware.firebase_auth import get_current_user
 from services.supabase_service import db
@@ -9,6 +10,7 @@ from models.schemas import RepoCreate, RepoResponse, RepoUpdate
 import uuid
 from datetime import datetime
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 async def get_user_id(current_user: dict) -> str:
@@ -20,37 +22,45 @@ async def get_user_id(current_user: dict) -> str:
 @router.get("/", response_model=List[RepoResponse])
 async def list_repos(current_user: dict = Depends(get_current_user)):
     user_id = await get_user_id(current_user)
+    logger.debug(f"[REPOS_ROUTE] Listing repos for user_id: {user_id}")
     repos = await db.get_repos_by_user(user_id)
     return repos
 
 @router.post("/", response_model=RepoResponse)
 async def create_repo(repo: RepoCreate, current_user: dict = Depends(get_current_user)):
     user_id = await get_user_id(current_user)
+    logger.info(f"[REPOS_ROUTE] User {user_id} adding new repo: {repo.github_full_name}")
     new_repo = await db.create_repo(user_id, repo.github_full_name, repo.github_repo_url)
     return new_repo
 
 @router.get("/{repo_id}", response_model=RepoResponse)
 async def get_repo(repo_id: str, current_user: dict = Depends(get_current_user)):
+    logger.debug(f"[REPOS_ROUTE] Getting repo details for repo_id: {repo_id}")
     repo = await db.get_repo_by_id(repo_id)
     if not repo:
+        logger.warning(f"[REPOS_ROUTE] Repo {repo_id} not found")
         raise HTTPException(status_code=404, detail="Repo not found")
     return repo
 
 @router.put("/{repo_id}", response_model=RepoResponse)
 async def update_repo(repo_id: str, repo_update: RepoUpdate, current_user: dict = Depends(get_current_user)):
+    logger.info(f"[REPOS_ROUTE] Updating repo {repo_id}")
     update_data = repo_update.model_dump(exclude_unset=True)
     repo = await db.update_repo(repo_id, update_data)
     return repo
 
 @router.delete("/{repo_id}")
 async def delete_repo(repo_id: str, current_user: dict = Depends(get_current_user)):
+    logger.info(f"[REPOS_ROUTE] Deleting repo {repo_id}")
     await db.delete_repo(repo_id)
     return {"message": "Repo removed from management"}
 
 @router.post("/{repo_id}/activate")
 async def activate_repo(repo_id: str, current_user: dict = Depends(get_current_user)):
+    logger.info(f"[REPOS_ROUTE] Activating ContriBot for repo {repo_id}")
     repo = await db.get_repo_by_id(repo_id)
     if not repo:
+        logger.warning(f"[REPOS_ROUTE] Repo {repo_id} not found for activation")
         raise HTTPException(status_code=404, detail="Repo not found")
         
     import os
@@ -77,10 +87,12 @@ async def activate_repo(repo_id: str, current_user: dict = Depends(get_current_u
     if base_url and not webhook_hook_id:
         webhook_url = f"{base_url}/api/v1/webhook/github/{repo_id}"
         try:
+            logger.info(f"[REPOS_ROUTE] Registering webhook for {repo['github_full_name']} at {webhook_url}")
             hook_id = await github_svc.register_webhook(repo["github_full_name"], webhook_url, webhook_secret)
             webhook_hook_id = str(hook_id)
+            logger.info(f"[REPOS_ROUTE] Webhook registered with ID: {webhook_hook_id}")
         except Exception as e:
-            print(f"Error registering webhook: {e}")
+            logger.error(f"[REPOS_ROUTE] Error registering webhook: {e}")
             
     update_data = {
         "contribot_active": True,
@@ -95,8 +107,10 @@ async def activate_repo(repo_id: str, current_user: dict = Depends(get_current_u
 
 @router.post("/{repo_id}/deactivate")
 async def deactivate_repo(repo_id: str, current_user: dict = Depends(get_current_user)):
+    logger.info(f"[REPOS_ROUTE] Deactivating ContriBot for repo {repo_id}")
     repo = await db.get_repo_by_id(repo_id)
     if not repo:
+        logger.warning(f"[REPOS_ROUTE] Repo {repo_id} not found for deactivation")
         raise HTTPException(status_code=404, detail="Repo not found")
         
     from services.github_service import github_svc
@@ -104,9 +118,10 @@ async def deactivate_repo(repo_id: str, current_user: dict = Depends(get_current
     webhook_hook_id = repo.get("webhook_hook_id")
     if webhook_hook_id:
         try:
+            logger.info(f"[REPOS_ROUTE] Deleting webhook {webhook_hook_id} for {repo['github_full_name']}")
             await github_svc.delete_webhook(repo["github_full_name"], int(webhook_hook_id))
         except Exception as e:
-            print(f"Error deleting webhook: {e}")
+            logger.error(f"[REPOS_ROUTE] Error deleting webhook: {e}")
             
     repo = await db.update_repo(repo_id, {
         "contribot_active": False,
@@ -193,8 +208,10 @@ async def get_repo_activity(repo_id: str, current_user: dict = Depends(get_curre
 @router.post("/{repo_id}/analyze")
 async def analyze_repo(repo_id: str, current_user: dict = Depends(get_current_user)):
     """Trigger full repo context build (creates agent_task)"""
+    logger.info(f"[REPOS_ROUTE] User {current_user.get('uid')} triggering analysis for repo {repo_id}")
     repo = await db.get_repo_by_id(repo_id)
     if not repo:
+        logger.warning(f"[REPOS_ROUTE] Repo {repo_id} not found for analysis")
         raise HTTPException(status_code=404, detail="Repo not found")
         
     task_id = await orchestrator.enqueue_task(repo_id, "build_context", {})
@@ -205,14 +222,17 @@ async def analyze_repo(repo_id: str, current_user: dict = Depends(get_current_us
 @router.get("/{repo_id}/context")
 async def get_repo_context(repo_id: str, current_user: dict = Depends(get_current_user)):
     """Get last built repo context (from cache in DB)"""
+    logger.debug(f"[REPOS_ROUTE] Getting context for repo {repo_id}")
     repo = await db.get_repo_by_id(repo_id)
     if not repo:
+        logger.warning(f"[REPOS_ROUTE] Repo {repo_id} not found for context retrieval")
         raise HTTPException(status_code=404, detail="Repo not found")
         
     try:
         context = await repo_context_service.get_context(repo_id, repo["github_full_name"])
     except Exception as e:
         error_msg = str(e).lower()
+        logger.error(f"[REPOS_ROUTE] Error getting context for repo {repo_id}: {e}")
         if "429" in error_msg or "quota" in error_msg or "resource_exhausted" in error_msg:
             raise HTTPException(
                 status_code=429, 

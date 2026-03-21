@@ -5,14 +5,17 @@ from fastapi.responses import JSONResponse
 from config import settings
 from api.routes import auth, repos, issues, prs, releases, webhook, agent
 import logging
+from logging_config import setup_logging
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    setup_logging()
+    logger.info("=" * 60)
     logger.info("Starting up ContriBot API...")
+    logger.info("=" * 60)
     try:
         from services.supabase_service import db
         logger.info("Supabase connection initialized.")

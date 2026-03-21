@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 class TemplateService:
     async def install_templates_on_repo(self, full_name: str) -> dict:
         """Installs standard ContriBot issue and PR templates on a managed repository."""
+        logger.info(f"[TEMPLATE] Installing standard templates on {full_name}")
         
         bug_report = """name: Bug Report
 description: File a bug report
@@ -189,14 +190,15 @@ jobs:
                 try:
                     exists = await github_svc.file_exists(full_name, path, branch)
                     if exists:
-                        logger.info(f"Skipping {path} on {full_name} as it already exists.")
+                        logger.info(f"[TEMPLATE] Skipping {path} on {full_name} as it already exists.")
                         results.append({"path": path, "status": "skipped", "reason": "already exists"})
                         continue
                         
+                    logger.info(f"[TEMPLATE] Creating {path} on {full_name}")
                     await github_svc.create_or_update_file(full_name, path, content, msg, branch)
                     results.append({"path": path, "status": "success"})
                 except Exception as e:
-                    logger.error(f"Failed to process {path} on {full_name}: {e}")
+                    logger.error(f"[TEMPLATE] Failed to process {path} on {full_name}: {e}")
                     results.append({"path": path, "status": "failed", "error": str(e)})
             
             # Special handling for PR template: append if exists
@@ -204,27 +206,33 @@ jobs:
             try:
                 exists = await github_svc.file_exists(full_name, pr_path, branch)
                 if exists:
+                    logger.debug(f"[TEMPLATE] PR template exists on {full_name}. Checking if verification line needs to be added.")
                     current_content = await github_svc.get_file_content(full_name, pr_path)
                     if "ContriBot's 2-model verification system" not in current_content:
+                        logger.info(f"[TEMPLATE] Appending verification line to PR template on {full_name}")
                         new_content = current_content + "\n\n---\n_This PR will be automatically reviewed by ContriBot's 2-model verification system._\n"
                         await github_svc.create_or_update_file(full_name, pr_path, new_content, "chore: append ContriBot verification to PR template", branch)
                         results.append({"path": pr_path, "status": "appended"})
                     else:
+                        logger.info(f"[TEMPLATE] PR template on {full_name} already has verification line. Skipping.")
                         results.append({"path": pr_path, "status": "skipped", "reason": "already has verification line"})
                 else:
+                    logger.info(f"[TEMPLATE] Creating new PR template on {full_name}")
                     await github_svc.create_or_update_file(full_name, pr_path, pr_template_content, "chore: add PR template", branch)
                     results.append({"path": pr_path, "status": "success"})
             except Exception as e:
-                logger.error(f"Failed to process PR template on {full_name}: {e}")
+                logger.error(f"[TEMPLATE] Failed to process PR template on {full_name}: {e}")
                 results.append({"path": pr_path, "status": "failed", "error": str(e)})
                     
+            logger.info(f"[TEMPLATE] Template installation completed for {full_name}. Results: {results}")
             return {"status": "completed", "results": results}
         except Exception as e:
-            logger.error(f"Failed to install templates on {full_name}: {e}")
+            logger.error(f"[TEMPLATE] Failed to install templates on {full_name}: {e}")
             return {"status": "failed", "error": str(e)}
 
     async def detect_and_adapt_templates(self, full_name: str, tech_stack: dict) -> dict:
         """Adapts the PR template based on the detected tech stack of the repository."""
+        logger.info(f"[TEMPLATE] Adapting templates for {full_name} based on tech stack: {tech_stack}")
         try:
             repo_info = await github_svc.get_repo(full_name)
             branch = repo_info.get("default_branch", "main")
@@ -251,6 +259,7 @@ jobs:
 
     async def handle_contribot_task_issue(self, repo_id: str, issue_number: int, issue_body: str) -> dict:
         """Parses a ContriBot Task issue and creates an agent task."""
+        logger.info(f"[TEMPLATE] Handling ContriBot task issue #{issue_number} for repo ID {repo_id}")
         try:
             # Parse the issue body (GitHub forms output markdown headers)
             task_type_match = re.search(r'### Task Type\s*\n\s*(.+)', issue_body)
@@ -260,6 +269,8 @@ jobs:
             task_type = task_type_match.group(1).strip() if task_type_match else "unknown"
             description = desc_match.group(1).strip() if desc_match else ""
             acceptance_criteria = criteria_match.group(1).strip() if criteria_match else ""
+            
+            logger.info(f"[TEMPLATE] Parsed task type: {task_type}")
             
             # Create agent task in Supabase
             task_data = {
@@ -271,6 +282,7 @@ jobs:
             }
             
             task = await supabase_svc.create_agent_task(task_data)
+            logger.info(f"[TEMPLATE] Created agent task ID: {task['id']}")
             
             # Get full name from repo_id
             repo = await supabase_svc.get_repository(repo_id)

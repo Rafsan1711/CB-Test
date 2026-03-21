@@ -95,10 +95,10 @@ class AgentOrchestrator:
                 input_data=input_data
             )
             await self.queue.put(item)
-            logger.info(f"Enqueued task {task_id} ({task_type}) for repo {repo_id} with priority {priority.name}")
+            logger.info(f"[TASK] Enqueued task {task_id} ({task_type}) for repo {repo_id} with priority {priority.name}")
             return task_id
         except Exception as e:
-            logger.error(f"Failed to enqueue task: {e}")
+            logger.error(f"[TASK] Failed to enqueue task: {e}")
             raise
 
     async def process_new_issue(self, repo_id: str, issue_number: int):
@@ -157,10 +157,15 @@ class AgentOrchestrator:
 
     async def _process_item(self, item: QueueItem):
         repo_sem = self._get_repo_semaphore(item.repo_id)
+        repo = await db.get_repo_by_id(item.repo_id)
+        repo_name = repo.get("github_full_name", "unknown/repo")
+        repo_prefix = f"[REPO: {repo_name}]"
         
         async with self.global_semaphore:
             async with repo_sem:
                 start_time = asyncio.get_event_loop().time()
+                logger.info("=" * 60)
+                logger.info(f"[TASK]{repo_prefix} Starting task {item.task_id} ({item.task_type})")
                 await self._log(item.repo_id, item.task_type, f"Starting task execution", item.task_id, start_time)
                 
                 try:
@@ -169,20 +174,31 @@ class AgentOrchestrator:
                     
                     result = await self._execute_with_retry(item)
                     
+                    duration_ms = int((asyncio.get_event_loop().time() - start_time) * 1000)
                     if result == "no_changes":
+                        logger.info(f"[TASK]{repo_prefix} Task {item.task_id} completed: No code changes were needed. Duration: {duration_ms}ms")
                         await self._log(item.repo_id, item.task_type, f"Task completed: No code changes were needed", item.task_id, start_time)
                     else:
+                        logger.info(f"[TASK]{repo_prefix} Task {item.task_id} completed successfully. Duration: {duration_ms}ms")
                         await self._log(item.repo_id, item.task_type, f"Task completed successfully", item.task_id, start_time)
                 except Exception as e:
+                    duration_ms = int((asyncio.get_event_loop().time() - start_time) * 1000)
+                    logger.error(f"[TASK]{repo_prefix} Task {item.task_id} failed permanently after {duration_ms}ms: {e}")
                     await self._log(item.repo_id, item.task_type, f"Task failed permanently: {e}", item.task_id, start_time, "error")
                 finally:
                     self.queue.task_done()
 
     async def _execute_with_retry(self, item: QueueItem):
         max_retries = 3
+        repo = await db.get_repo_by_id(item.repo_id)
+        repo_name = repo.get("github_full_name", "unknown/repo")
+        repo_prefix = f"[REPO: {repo_name}]"
         
         for attempt in range(max_retries + 1):
             try:
+                if attempt > 0:
+                    logger.info(f"[TASK]{repo_prefix} Retry attempt {attempt}/{max_retries} for task {item.task_id}")
+                
                 result = await self._route_task(item)
                 # If successful, update DB and break
                 await db.update_agent_task(item.task_id, "completed")
@@ -196,6 +212,7 @@ class AgentOrchestrator:
                 
                 if attempt == max_retries:
                     # Final failure
+                    logger.error(f"[TASK]{repo_prefix} Task {item.task_id} failed after {max_retries} retries. Error: {e}")
                     await db.update_agent_task(item.task_id, "failed", error_message=str(e))
                     
                     # Log to error_service
@@ -211,7 +228,7 @@ class AgentOrchestrator:
                 # Determine backoff strategy
                 if "404" in error_msg and "github" in error_msg:
                     # Permanent failure
-                    logger.error(f"Permanent GitHub 404 error for task {item.task_id}. Aborting.")
+                    logger.error(f"[TASK]{repo_prefix} Permanent GitHub 404 error for task {item.task_id}. Aborting.")
                     db.client.table("agent_tasks").update({
                         "status": "failed",
                         "error_message": "GitHub 404 Not Found",
@@ -222,14 +239,14 @@ class AgentOrchestrator:
                 elif "rate limit" in error_msg or "429" in error_msg:
                     if "gemini" in error_msg:
                         wait_time = 60
-                        logger.warning(f"Gemini rate limit hit. Waiting {wait_time}s before retry {attempt+1}/{max_retries}")
+                        logger.warning(f"[TASK]{repo_prefix} Gemini rate limit hit. Waiting {wait_time}s before retry {attempt+1}/{max_retries}. Error: {e}")
                     else:
                         wait_time = 300
-                        logger.warning(f"GitHub API rate limit hit. Waiting {wait_time}s before retry {attempt+1}/{max_retries}")
+                        logger.warning(f"[TASK]{repo_prefix} GitHub API rate limit hit. Waiting {wait_time}s before retry {attempt+1}/{max_retries}. Error: {e}")
                 else:
                     # Network or other error -> exponential backoff: 30s, 60s, 120s
                     wait_time = 30 * (2 ** attempt)
-                    logger.warning(f"Error executing task {item.task_id}: {e}. Waiting {wait_time}s before retry {attempt+1}/{max_retries}")
+                    logger.warning(f"[TASK]{repo_prefix} Error executing task {item.task_id}: {e}. Waiting {wait_time}s before retry {attempt+1}/{max_retries}")
                 
                 await asyncio.sleep(wait_time)
 
@@ -341,13 +358,16 @@ class AgentOrchestrator:
         github_issue_number = item.input_data.get("github_issue_number")
         repo = await db.get_repo_by_id(item.repo_id)
         full_name = repo["github_full_name"]
+        repo_prefix = f"[REPO: {full_name}]"
         preferred_model = repo.get("settings", {}).get("preferred_model")
         
-        logger.info(f"Analyzing issue #{github_issue_number} for {full_name} (Preferred Model: {preferred_model})")
+        logger.info(f"[TASK]{repo_prefix} Analyzing issue #{github_issue_number} (Preferred Model: {preferred_model})")
         
         issue_data = await github_svc.get_issue(full_name, github_issue_number)
+        logger.info(f"[TASK]{repo_prefix} Building focused context for issue #{github_issue_number}")
         focused_context = await repo_context_service.build_focused_context(full_name, issue_data)
         
+        logger.info(f"[TASK]{repo_prefix} Calling Gemini to analyze issue #{github_issue_number}")
         analysis = await gemini_svc.analyze_issue(
             issue_title=issue_data.get("title", ""),
             issue_body=issue_data.get("body", ""),
@@ -357,6 +377,7 @@ class AgentOrchestrator:
         
         issue_type = analysis.get("type", "feature").lower()
         requires_approval = analysis.get("requires_approval", False)
+        logger.info(f"[TASK]{repo_prefix} Analysis result: type={issue_type}, requires_approval={requires_approval}")
         
         # Update or create issue in DB
         existing = await db.get_issues_by_repo(item.repo_id)
@@ -437,21 +458,24 @@ Reply **`no`** to close this issue."""
             
         repo = await db.get_repo_by_id(item.repo_id)
         full_name = repo["github_full_name"]
+        repo_prefix = f"[REPO: {full_name}]"
         preferred_model = repo.get("settings", {}).get("preferred_model")
         
-        logger.info(f"Implementing issue #{github_issue_number} for {full_name} (Preferred Model: {preferred_model})")
+        logger.info(f"[TASK]{repo_prefix} Implementing issue #{github_issue_number} (Preferred Model: {preferred_model})")
         
         issue_data = await github_svc.get_issue(full_name, github_issue_number)
         
         # Build focused context
+        logger.info(f"[TASK]{repo_prefix} Building focused context for implementation of #{github_issue_number}")
         context = await repo_context_service.build_focused_context(full_name, issue_data)
         
         # Generate code
+        logger.info(f"[TASK]{repo_prefix} Generating code for issue #{github_issue_number}")
         plan = await gemini_svc.write_code_for_issue(context, issue_data, preferred_model=preferred_model)
         
         # Create branch
         branch_name = plan.get("branch_name", f"contribot/issue-{github_issue_number}").replace("{{number}}", str(github_issue_number))
-        logger.info(f"Creating branch {branch_name} for {full_name}")
+        logger.info(f"[TASK]{repo_prefix} Creating branch {branch_name}")
         await github_svc.create_branch(full_name, branch_name)
         
         # Apply changes
@@ -459,11 +483,11 @@ Reply **`no`** to close this issue."""
         files_modified = plan.get("files_to_modify", [])
         files_deleted = plan.get("files_to_delete", [])
         
-        logger.info(f"Applying changes: {len(files_created)} created, {len(files_modified)} modified, {len(files_deleted)} deleted")
+        logger.info(f"[TASK]{repo_prefix} Applying changes: {len(files_created)} created, {len(files_modified)} modified, {len(files_deleted)} deleted")
         
         if not files_created and not files_modified and not files_deleted:
             error_msg = "🤖 ContriBot analyzed the issue but couldn't determine any necessary code changes. Please provide more details or clarify the requirements."
-            logger.warning(f"No changes generated for issue {github_issue_number}. {error_msg}")
+            logger.warning(f"[TASK]{repo_prefix} No changes generated for issue {github_issue_number}. {error_msg}")
             await github_svc.add_issue_comment(full_name, github_issue_number, error_msg)
             await db.update_issue(issue_id, {"status": "open"})
             return "no_changes"
@@ -472,28 +496,28 @@ Reply **`no`** to close this issue."""
             path = f.get("path")
             content = f.get("content")
             if not path or content is None:
-                logger.warning(f"Skipping invalid file creation: {f}")
+                logger.warning(f"[TASK]{repo_prefix} Skipping invalid file creation: {f}")
                 continue
-            logger.info(f"Creating file {path}")
+            logger.info(f"[TASK]{repo_prefix} Creating file {path} ({len(content)} chars)")
             await github_svc.create_or_update_file(full_name, path, content, f"feat: create {path}", branch_name)
             
         for f in files_modified:
             path = f.get("path")
             content = f.get("modified_content")
             if not path or content is None:
-                logger.warning(f"Skipping invalid file modification: {f}")
+                logger.warning(f"[TASK]{repo_prefix} Skipping invalid file modification: {f}")
                 continue
-            logger.info(f"Updating file {path}")
+            logger.info(f"[TASK]{repo_prefix} Updating file {path} ({len(content)} chars)")
             await github_svc.create_or_update_file(full_name, path, content, f"fix: update {path}", branch_name)
         for path in files_deleted:
-            logger.info(f"Deleting file {path}")
+            logger.info(f"[TASK]{repo_prefix} Deleting file {path}")
             # PyGithub delete_file requires sha
             try:
                 repo_obj = github_svc.client.get_repo(full_name)
                 contents = repo_obj.get_contents(path, ref=branch_name)
                 repo_obj.delete_file(path, f"chore: delete {path}", contents.sha, branch=branch_name)
             except Exception as e:
-                logger.error(f"Failed to delete {path}: {e}")
+                logger.error(f"[TASK]{repo_prefix} Failed to delete {path}: {e}")
                 pass
                 
         # Create PR
@@ -503,7 +527,7 @@ Reply **`no`** to close this issue."""
         pr_title = plan.get("pr_title", default_title)
         pr_body = plan.get("pr_body", default_body)
         
-        logger.info(f"Creating Pull Request: {pr_title}")
+        logger.info(f"[TASK]{repo_prefix} Creating Pull Request: {pr_title}")
         
         try:
             pr_number = await github_svc.create_pull_request(
@@ -512,7 +536,7 @@ Reply **`no`** to close this issue."""
                 pr_body, 
                 branch_name
             )
-            logger.info(f"PR #{pr_number} created successfully")
+            logger.info(f"[TASK]{repo_prefix} PR #{pr_number} created successfully")
         except Exception as e:
             logger.error(f"Failed to create PR: {e}")
             await github_svc.add_issue_comment(full_name, github_issue_number, f"🤖 ContriBot failed to create a Pull Request: {e}")
@@ -561,6 +585,7 @@ _(2 AI models are reviewing this PR. Results below.)_"""
         
         repo = await db.get_repo_by_id(item.repo_id)
         full_name = repo["github_full_name"]
+        repo_prefix = f"[REPO: {full_name}]"
         
         if not github_pr_number and pr_id:
             # Fetch from DB if missing
@@ -572,11 +597,18 @@ _(2 AI models are reviewing this PR. Results below.)_"""
         if not github_pr_number:
             raise ValueError(f"Missing github_pr_number for task {item.task_id}")
             
+        logger.info(f"[TASK]{repo_prefix} Verifying PR #{github_pr_number}")
         pr_data = await github_svc.get_pull_request(full_name, github_pr_number)
         diff = await github_svc.get_pr_diff(full_name, github_pr_number)
         context = await repo_context_service.get_context(item.repo_id, full_name)
         
+        logger.info(f"[TASK]{repo_prefix} Running multi-model verification for PR #{github_pr_number}")
         consensus = await gemini_svc.verify_pr_multimodel(diff, pr_data["title"], pr_data["body"], context)
+        
+        for r in consensus.results:
+            logger.info(f"[TASK]{repo_prefix} Model {r.model_name} verdict: {'Approved' if r.approved else 'Rejected'} (Score: {r.score}/10)")
+        
+        logger.info(f"[TASK]{repo_prefix} Final consensus: {consensus.consensus_score}/2 approved. Safe to merge: {consensus.safe_to_merge}")
         
         if not pr_id:
             # Check if it exists in DB by github_pr_number
@@ -756,7 +788,9 @@ Return ONLY valid JSON matching the write_code schema.
     async def _handle_release(self, item: QueueItem):
         repo = await db.get_repo_by_id(item.repo_id)
         full_name = repo["github_full_name"]
+        repo_prefix = f"[REPO: {full_name}]"
         
+        logger.info(f"[TASK]{repo_prefix} Checking for new release...")
         # 1. Get latest release tag
         latest_release = await github_svc.get_latest_release(full_name)
         since_date = latest_release.get("published_at") if latest_release else None
@@ -777,7 +811,7 @@ Return ONLY valid JSON matching the write_code schema.
         commits = await github_svc._run_async(_get_commits)
         
         if not commits:
-            logger.info(f"No commits found for release in {full_name}")
+            logger.info(f"[TASK]{repo_prefix} No commits found for release.")
             return
             
         # 3. Analyze commit messages for version bump type
@@ -809,6 +843,7 @@ Return ONLY valid JSON matching the write_code schema.
             parts[2] += 1
             
         new_version = f"v{parts[0]}.{parts[1]}.{parts[2]}"
+        logger.info(f"[TASK]{repo_prefix} Release analysis: bump_type={bump_type}, new_version={new_version}")
         
         # 4. Create release
         release_notes = "## Changes\n" + "\n".join([f"- {msg.split(chr(10))[0]}" for msg in commit_messages])

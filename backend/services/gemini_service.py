@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import httpx
+import time
 from google import genai
 from google.genai import types
 from config import settings
@@ -68,6 +69,7 @@ class GeminiService:
     async def generate(self, prompt: str, model: str = None, system_prompt: str = None, json_mode: bool = False, temperature: float = 0.3, client: genai.Client = None, preferred_model: str = None) -> str:
         """Generate content using DeepSeek-R1 as default (if HF_TOKEN exists) with fallback to Gemini."""
         target_client = client or self.client
+        start_time = time.time()
         
         # Determine which model to try first
         use_deepseek_first = False
@@ -80,12 +82,17 @@ class GeminiService:
             
         if use_deepseek_first:
             try:
-                return await self._generate_with_deepseek(prompt, system_prompt, json_mode, temperature)
+                logger.debug(f"[GEMINI] Attempting generation with DeepSeek (Prompt len: {len(prompt)})")
+                res = await self._generate_with_deepseek(prompt, system_prompt, json_mode, temperature)
+                duration = time.time() - start_time
+                logger.info(f"[GEMINI] DeepSeek generation successful in {duration:.2f}s")
+                return res
             except Exception as e:
-                logger.error(f"DeepSeek execution failed for prompt (len={len(prompt)}): {e}. Falling back to Gemini.")
+                logger.error(f"[GEMINI] DeepSeek execution failed for prompt (len={len(prompt)}): {e}. Falling back to Gemini.")
         
         # Gemini Logic
         model = model or self.MODEL_FLASH
+        logger.debug(f"[GEMINI] Attempting generation with Gemini model {model} (Prompt len: {len(prompt)})")
         
         config_args = {"temperature": temperature}
         if json_mode:
@@ -109,15 +116,19 @@ class GeminiService:
                 text = response.text
                 if json_mode:
                     text = self._clean_json_response(text)
+                
+                duration = time.time() - start_time
+                logger.info(f"[GEMINI] Gemini generation ({model}) successful in {duration:.2f}s (Attempt {attempt + 1})")
                 return text
             except Exception as e:
                 error_msg = str(e)
                 if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-                    logger.error(f"Gemini Quota Exceeded for model {model}. Prompt length: {len(prompt)}")
-                    raise QuotaExceededError("Gemini API Quota Exceeded.")
+                    logger.error(f"[GEMINI] Gemini Quota Exceeded for model {model}. Prompt length: {len(prompt)}")
+                    raise Exception("Gemini API Quota Exceeded.")
                 
-                logger.warning(f"Gemini API error on attempt {attempt + 1} for model {model}: {error_msg}")
+                logger.warning(f"[GEMINI] Gemini API error on attempt {attempt + 1} for model {model}: {error_msg}")
                 if attempt == 2:
+                    logger.error(f"[GEMINI] Gemini API failed after 3 attempts: {error_msg}")
                     raise Exception(f"Gemini API failed after 3 attempts: {error_msg}")
                 await asyncio.sleep(2 ** attempt)
 
@@ -175,6 +186,7 @@ class GeminiService:
                 raise e
 
     async def write_code_for_issue(self, repo_context: dict, issue: dict, preferred_model: str = None) -> dict:
+        logger.info(f"[GEMINI] Generating code implementation plan for issue #{issue.get('github_issue_number') or 'unknown'}")
         prompt = f"""
 Repo Context:
 {json.dumps(repo_context)}
@@ -205,7 +217,12 @@ Return ONLY valid JSON matching this schema:
 }}
 """
         res = await self.generate(prompt, self.MODEL_PRO, system_prompt=SYSTEM_PROMPT_ENGINEER, json_mode=True, preferred_model=preferred_model)
-        return json.loads(res)
+        try:
+            return json.loads(res)
+        except json.JSONDecodeError as e:
+            logger.error(f"[GEMINI] Failed to parse implementation plan JSON: {e}")
+            logger.debug(f"[GEMINI] Raw response: {res}")
+            raise
 
     async def verify_pr_multimodel(self, diff: str, pr_title: str, pr_body: str, repo_context: dict) -> ConsensusSummary:
         prompt = f"""
@@ -286,6 +303,7 @@ Return ONLY valid JSON matching this schema:
         )
 
     async def analyze_issue(self, issue_title: str, issue_body: str, repo_context: dict, preferred_model: str = None) -> dict:
+        logger.info(f"[GEMINI] Analyzing issue: {issue_title}")
         prompt = f"""
 Repo Context:
 {json.dumps(repo_context)}
@@ -311,7 +329,12 @@ Analyze this issue. Return ONLY valid JSON matching this schema:
 }}
 """
         res = await self.generate(prompt, self.MODEL_FLASH, system_prompt=SYSTEM_PROMPT_ANALYST, json_mode=True, preferred_model=preferred_model)
-        return json.loads(res)
+        try:
+            return json.loads(res)
+        except json.JSONDecodeError as e:
+            logger.error(f"[GEMINI] Failed to parse issue analysis JSON: {e}")
+            logger.debug(f"[GEMINI] Raw response: {res}")
+            raise
 
     async def determine_version_bump(self, pr_titles: list[str], commit_messages: list[str], current_version: str) -> dict:
         system_prompt = """You are an expert release manager. Determine the next semantic version based on the changes.

@@ -1,10 +1,13 @@
 import uuid
 import traceback
+import logging
 from enum import Enum
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from services.supabase_service import db
 from services.github_service import GitHubService
+
+logger = logging.getLogger(__name__)
 
 class ErrorCategory(Enum):
     GITHUB_API = "github_api"
@@ -35,6 +38,12 @@ class ErrorService:
         error_msg = str(error)
         tb = traceback.format_exc()
         
+        logger.error(f"[ERROR_SVC] Logging {severity} error in {category.value}: {error_msg}")
+        if repo_id:
+            logger.error(f"[ERROR_SVC] Repo ID: {repo_id}")
+        if task_id:
+            logger.error(f"[ERROR_SVC] Task ID: {task_id}")
+        
         log_data = {
             "repo_id": repo_id,
             "task_id": task_id,
@@ -49,12 +58,14 @@ class ErrorService:
         try:
             result = db.client.table("error_logs").insert(log_data).execute()
             log_record = result.data[0] if result.data else None
+            logger.info(f"[ERROR_SVC] Error logged to database with ID: {log_record.get('id') if log_record else 'unknown'}")
         except Exception as e:
-            print(f"Failed to log error to Supabase: {e}")
+            logger.error(f"[ERROR_SVC] Failed to log error to Supabase: {e}")
             return None
             
         # If critical and we have a repo_id, create a GitHub issue
         if severity == "critical" and repo_id:
+            logger.warning(f"[ERROR_SVC] Critical error detected for repo {repo_id}. Attempting to create GitHub issue.")
             try:
                 repo = await db.get_repo_by_id(repo_id)
                 if repo and repo.get("github_full_name"):
@@ -74,12 +85,13 @@ An automated critical error was detected by ContriBot.
 {tb}
 ```
 """
+                    logger.info(f"[ERROR_SVC] Would create GitHub issue on {repo['github_full_name']}: {issue_title}")
                     # We would need the user's installation token here, but for now we'll just log it
                     # In a real scenario, we'd fetch the installation token and create the issue
                     # await self.github_service.create_issue(installation_id, repo["github_full_name"], issue_title, issue_body, labels=["contribot-error"])
                     pass
             except Exception as e:
-                print(f"Failed to create GitHub issue for critical error: {e}")
+                logger.error(f"[ERROR_SVC] Failed to create GitHub issue for critical error: {e}")
                 
         return log_record
 

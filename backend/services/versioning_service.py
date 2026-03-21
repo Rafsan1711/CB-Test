@@ -1,9 +1,13 @@
 import re
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 class VersioningService:
     def parse_version(self, version_str: str) -> tuple[int, int, int]:
         """Parse 'v1.2.3' -> (1, 2, 3). Handles edge cases."""
+        logger.debug(f"[VERSION] Parsing version string: {version_str}")
         if not version_str:
             return (0, 0, 0)
         
@@ -26,6 +30,7 @@ class VersioningService:
         bump_type "patch": v1.2.3 -> v1.2.4
         Always returns string with "v" prefix.
         """
+        logger.info(f"[VERSION] Bumping version {current} with type: {bump_type}")
         major, minor, patch = self.parse_version(current)
         bump_type = bump_type.lower()
         
@@ -53,6 +58,7 @@ class VersioningService:
         - Any commit with "feat:" or "feature:" -> "minor"
         - Everything else -> "patch"
         """
+        logger.debug(f"[VERSION] Determining bump type from {len(commit_messages)} commits")
         bump_type = "patch"
         
         for msg in commit_messages:
